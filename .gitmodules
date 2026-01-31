@@ -1,0 +1,3 @@
+[submodule "submodules/rafi"]
+	path = submodules/rafi
+	url = https://github.com/ingowald/rafi.git

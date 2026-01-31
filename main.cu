@@ -5,9 +5,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
-// cuda
-#include <thrust/copy.h>
-#include <thrust/execution_policy.h>
+// rafi
+#include "rafi/implementation.h"
 // ours
 #include "common.h"
 #include "vecmath.h"
@@ -17,12 +16,24 @@ namespace streami {
 using namespace vecmath;
 
 // ========================================================
+// MPI
+// ========================================================
+
+struct RankInfo {
+  int rankID;
+  int commSize;
+};
+
+// ========================================================
 // Particle
 // ========================================================
 
 struct Particle {
   int ID;
   vec3f P;
+#if 1//ndef NDEBUG
+  bool dbg; // compat with rafi..
+#endif
 };
 
 struct particle_valid {
@@ -95,7 +106,7 @@ struct VecField {
   };
 };
 
-struct SphericalField : public VecField{
+struct SphericalField : public VecField {
   struct DD : public VecField::DD {
     inline __device__ bool sample(const vec3f P, vec3f &value) const {
       if (!mcBounds.contains(P))
@@ -139,7 +150,7 @@ struct SphericalField : public VecField{
     float radius;
   };
 
-  inline DD getDD() {
+  inline DD getDD(const RankInfo &ri) {
     DD dd;
     dd.center = center;
     dd.radius = radius;
@@ -156,24 +167,29 @@ struct SphericalField : public VecField{
 // Kernels
 // ========================================================
 
-__global__ void generateRandomSeeds(
-    const box3f bounds, Particle *particles, int numParticles)
+__global__ void generateRandomSeeds(const box3f bounds,
+                                    rafi::DeviceInterface<Particle> rafi,
+                                    Particle *output, // to dump to file
+                                    int numParticles)
 {
   int particleID = threadIdx.x+blockIdx.x*blockDim.x;
   if (particleID >= numParticles) return;
 
   Random rand(particleID,numParticles);
-  Particle &p = particles[particleID];
+  Particle p;
   p.ID = particleID;
   p.P.x = rand()*bounds.size().x+bounds.lower.x;
   p.P.y = rand()*bounds.size().y+bounds.lower.y;
   p.P.z = rand()*bounds.size().z+bounds.lower.z;
+  rafi.emitOutgoing(p,0);
+  // for dumping:
+  output[particleID] = p;
 }
 
 template<typename Field>
 __global__ void update(const Field &field,
-                       Particle *thisGen, /* particle positions before */
-                       Particle *nextGen, /* particle positions after */
+                       rafi::DeviceInterface<Particle> rafi,
+                       Particle *output, // to dump to file
                        int numParticles,
                        float stepSize,
                        float minLength)
@@ -181,14 +197,12 @@ __global__ void update(const Field &field,
   int particleID = threadIdx.x+blockIdx.x*blockDim.x;
   if (particleID >= numParticles) return;
 
-  nextGen[particleID].ID = thisGen[particleID].ID;
+  //const vec3f P0 = particles[particleID].P;
+  Particle p = rafi.getIncoming(particleID);
+  const vec3f P0 = p.P;
 
-  const vec3f P0 = thisGen[particleID].P;
-
-  if (isnan(P0.x) || isnan(P0.y) || isnan(P0.z)) {
-    nextGen[particleID].P = vec3f(NAN);
+  if (isnan(P0.x) || isnan(P0.y) || isnan(P0.z))
     return;
-  }
 
   bool valid{true};
   vec3f k1;
@@ -213,57 +227,72 @@ __global__ void update(const Field &field,
   const vec3f P = P0 + 1/6.f*(k1+2.f*k2+2.f*k3+k4);
 
   if (!field.worldBounds.contains(P) || length(P-P0) < minLength) {
-    nextGen[particleID].P = vec3f(NAN);
     return;
   }
 
-  nextGen[particleID].P = P;
+  p.P = P;
+  rafi.emitOutgoing(p,0);
+  // for dumping:
+  output[particleID] = p;
 }
 
 } // streami
 
 int main(int argc, char **argv) {
   using namespace streami;
+
+  RAFI_CUDA_CALL(Free(0));
+  RAFI_MPI_CALL(Init(&argc,&argv));
+
+  rafi::HostContext<Particle> *rafi = rafi::createContext<Particle>(MPI_COMM_WORLD, 0);
+
+  RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
+
   SphericalField field;
   field.center = vec3f(0.f);
   field.radius = 1.f;
 
-  SphericalField::DD fieldDD = field.getDD();
+  SphericalField::DD fieldDD = field.getDD(ri);
 
-  Particle *thisGen{nullptr};
-  Particle *nextGen{nullptr};
   int N=5000;
-  CUDA_SAFE_CALL(cudaMalloc(&thisGen,sizeof(Particle)*N));
-  CUDA_SAFE_CALL(cudaMalloc(&nextGen,sizeof(Particle)*N));
+  rafi->resizeRayQueues(N);
 
+  // for file I/O:
   ParticleIO io;
+  Particle *output{nullptr};
+  CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
   #define CONFIG_KERNEL(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
-  CONFIG_KERNEL(generateRandomSeeds,N)(fieldDD.worldBounds,thisGen,N);
-  io.append(thisGen,N);
+  CONFIG_KERNEL(generateRandomSeeds,N)(
+      fieldDD.worldBounds,rafi->getDeviceInterface(),output,N);
+  io.append(output,N);
 
   int activeN=N;
   int steps=1000;
+
   std::cout << "Computing " << steps << " Runge-Kutta steps for "
       << activeN << " particles...\n";
+
   int i=0;
   for (; i<steps; ++i) {
-    CONFIG_KERNEL(update,activeN)(fieldDD,thisGen,nextGen,activeN,0.1f,1e-10f);
-    io.append(nextGen,activeN);
-    auto it = thrust::copy_if(thrust::device,
-                              nextGen,
-                              nextGen+activeN,
-                              thisGen,
-                              particle_valid());
-    activeN = it-thisGen;
+    CONFIG_KERNEL(update,activeN)(
+        fieldDD,rafi->getDeviceInterface(),output,activeN,0.1f,1e-10f);
+    rafi::ForwardResult result = rafi->forwardRays();
+    io.append(output,activeN);
+    activeN = result.numRaysInIncomingQueueThisRank;
     if (activeN<1) break;
   }
   std::cout << "Done after " << i
       << " steps, particles still active: " << activeN << '\n';
 
+  std::string fileName = "streamlines";
+  fileName += std::to_string(ri.rankID);
+  fileName += ".obj";
   std::cout << "Saving out to obj..\n";
-  io.saveOBJ("streamlines.obj");
+  io.saveOBJ(fileName);
   std::cout << "Done.. bye!\n";
+
+  RAFI_MPI_CALL(Finalize());
 }
 
 

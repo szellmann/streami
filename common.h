@@ -32,7 +32,9 @@
 # define __host__
 # define __device__
 #endif
-#define __both__ __host__ __device__
+#ifndef __both__
+# define __both__ __host__ __device__
+#endif
 
 // ours
 #include "vecmath.h"

@@ -49,17 +49,18 @@ struct ParticleIO {
   std::vector<Line> lines;
 
   void append(const Particle *particles, int numParticles) {
+    if (numParticles <= 0)
+      return;
+
     std::vector<Particle> thisGen(numParticles);
     CUDA_SAFE_CALL(cudaMemcpy(thisGen.data(),
                               particles,
                               sizeof(particles[0])*numParticles,
                               cudaMemcpyDefault));
-    if (lines.empty()) {
-      lines.resize(numParticles);
-    }
-
     std::sort(thisGen.begin(),thisGen.end(),
         [](const Particle &p0, const Particle &p1){ return p0.ID<p1.ID; });
+
+    lines.resize(std::max((int)lines.size(),thisGen.back().ID+1));
 
     for (int i=0; i<numParticles; ++i) {
       assert(lines.size() > thisGen[i].ID);
@@ -103,6 +104,18 @@ struct VecField {
     box3f worldBounds;
     vec3i mcID;
     box3f mcBounds;
+
+    inline __both__
+    void compute_mcID(int rankID, const vec3i gridSize) {
+      mcID.x = rankID%gridSize.x;
+      mcID.y = (rankID/gridSize.x)%gridSize.y;
+      mcID.z = rankID/(gridSize.x*gridSize.y);
+    }
+
+    inline __both__
+    int flattened_mcID(const vec3i ID, const vec3i gridSize) const {
+      return ID.x+ID.y*gridSize.x+ID.z*gridSize.x*gridSize.y;
+    }
   };
 };
 
@@ -143,17 +156,36 @@ struct SphericalField : public VecField {
       worldBounds.extend(center-vec3f(radius));
       worldBounds.extend(center+vec3f(radius));
 
-      mcBounds = worldBounds;
+      int gridSize(cbrtf(ri.commSize));
+      compute_mcID(ri.rankID,vec3i(gridSize));
+
+      vec3f mcSize = worldBounds.size()/vec3f(gridSize);
+
+      mcBounds.lower = worldBounds.lower+vec3f(mcID)*mcSize;
+      mcBounds.upper = worldBounds.lower+vec3f(mcID)*mcSize+mcSize;
+    }
+
+    inline __both__
+    int destinationID(vec3f P) const {
+      int gridSize(cbrtf(ri.commSize));
+      vec3f mcSize = worldBounds.size()/vec3f(gridSize);
+      P -= worldBounds.lower;
+      vec3f idf(P/mcSize);
+      vec3i id(idf.x,idf.y,idf.z);
+      return flattened_mcID(id,gridSize);
     }
 
     vec3f center;
     float radius;
+
+    RankInfo ri;
   };
 
   inline DD getDD(const RankInfo &ri) {
     DD dd;
     dd.center = center;
     dd.radius = radius;
+    dd.ri = ri;
     dd.computeBounds();
     return dd;
   }
@@ -167,7 +199,8 @@ struct SphericalField : public VecField {
 // Kernels
 // ========================================================
 
-__global__ void generateRandomSeeds(const box3f bounds,
+template<typename Field>
+__global__ void generateRandomSeeds(const Field &field,
                                     rafi::DeviceInterface<Particle> rafi,
                                     Particle *output, // to dump to file
                                     int numParticles)
@@ -177,11 +210,12 @@ __global__ void generateRandomSeeds(const box3f bounds,
 
   Random rand(particleID,numParticles);
   Particle p;
-  p.ID = particleID;
-  p.P.x = rand()*bounds.size().x+bounds.lower.x;
-  p.P.y = rand()*bounds.size().y+bounds.lower.y;
-  p.P.z = rand()*bounds.size().z+bounds.lower.z;
-  rafi.emitOutgoing(p,0);
+  p.ID = numParticles*field.ri.rankID+particleID;
+  p.P.x = rand()*field.mcBounds.size().x+field.mcBounds.lower.x;
+  p.P.y = rand()*field.mcBounds.size().y+field.mcBounds.lower.y;
+  p.P.z = rand()*field.mcBounds.size().z+field.mcBounds.lower.z;
+  rafi.emitOutgoing(p,field.ri.rankID); // only on ours!
+  //printf("%i -- %f,%f,%f\n",field.ri.rankID,P0.x,P0.y,P0.z);
   // for dumping:
   output[particleID] = p;
 }
@@ -197,7 +231,6 @@ __global__ void update(const Field &field,
   int particleID = threadIdx.x+blockIdx.x*blockDim.x;
   if (particleID >= numParticles) return;
 
-  //const vec3f P0 = particles[particleID].P;
   Particle p = rafi.getIncoming(particleID);
   const vec3f P0 = p.P;
 
@@ -225,13 +258,16 @@ __global__ void update(const Field &field,
   k4 *= stepSize;
   
   const vec3f P = P0 + 1/6.f*(k1+2.f*k2+2.f*k3+k4);
+  //printf("%i => %f,%f,%f\n",field.ri.rankID,P.x,P.y,P.z);
 
   if (!field.worldBounds.contains(P) || length(P-P0) < minLength) {
     return;
   }
 
   p.P = P;
-  rafi.emitOutgoing(p,0);
+  int dest = field.destinationID(P);
+  //printf("%i => %i\n",field.ri.rankID,dest);
+  rafi.emitOutgoing(p,dest);
   // for dumping:
   output[particleID] = p;
 }
@@ -255,6 +291,8 @@ int main(int argc, char **argv) {
   SphericalField::DD fieldDD = field.getDD(ri);
 
   int N=5000;
+  int localN=iDivUp(N,ri.commSize);
+  N *= ri.commSize;
   rafi->resizeRayQueues(N);
 
   // for file I/O:
@@ -263,27 +301,28 @@ int main(int argc, char **argv) {
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
   #define CONFIG_KERNEL(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
-  CONFIG_KERNEL(generateRandomSeeds,N)(
-      fieldDD.worldBounds,rafi->getDeviceInterface(),output,N);
-  io.append(output,N);
+  CONFIG_KERNEL(generateRandomSeeds,localN)(
+      fieldDD,rafi->getDeviceInterface(),output,localN);
+  rafi->forwardRays();
+  io.append(output,localN);
 
-  int activeN=N;
   int steps=1000;
 
   std::cout << "Computing " << steps << " Runge-Kutta steps for "
-      << activeN << " particles...\n";
+      << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";
 
   int i=0;
   for (; i<steps; ++i) {
-    CONFIG_KERNEL(update,activeN)(
-        fieldDD,rafi->getDeviceInterface(),output,activeN,0.1f,1e-10f);
+    if (localN) {
+      CONFIG_KERNEL(update,localN)(
+          fieldDD,rafi->getDeviceInterface(),output,localN,0.1f,1e-10f);
+    }
     rafi::ForwardResult result = rafi->forwardRays();
-    io.append(output,activeN);
-    activeN = result.numRaysInIncomingQueueThisRank;
-    if (activeN<1) break;
+    io.append(output,localN);
+    localN = result.numRaysInIncomingQueueThisRank;
+    std::cout << "rank " << ri.rankID << " in queue: " << localN << '\n';
   }
-  std::cout << "Done after " << i
-      << " steps, particles still active: " << activeN << '\n';
+  std::cout << "Done\n";
 
   std::string fileName = "streamlines";
   fileName += std::to_string(ri.rankID);

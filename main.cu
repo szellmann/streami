@@ -8,41 +8,14 @@
 // rafi
 #include "rafi/implementation.h"
 // ours
-#include "common.h"
-#include "vecmath.h"
+#include "streami.h"
+#include "field/Spherical.h"
 
 namespace streami {
 
-using namespace vecmath;
-
 // ========================================================
-// MPI
+// Helper class, writes particles to obj file:
 // ========================================================
-
-struct RankInfo {
-  int rankID;
-  int commSize;
-};
-
-// ========================================================
-// Particle
-// ========================================================
-
-struct Particle {
-  int ID;
-  vec3f P;
-#if 1//ndef NDEBUG
-  bool dbg; // compat with rafi..
-#endif
-};
-
-struct particle_valid {
-  __both__
-  inline bool operator()(const Particle &p) {
-    const vec3f P = p.P;
-    return !(isnan(P.x)||isnan(P.y)||isnan(P.z));
-  }
-};
 
 struct ParticleIO {
   typedef std::vector<Particle> Line;
@@ -95,104 +68,6 @@ struct ParticleIO {
   }
 };
 
-// ========================================================
-// Fields
-// ========================================================
-
-struct VecField {
-  struct DD {
-    box3f worldBounds;
-    vec3i mcID;
-    box3f mcBounds;
-
-    inline __both__
-    void compute_mcID(int rankID, const vec3i gridSize) {
-      mcID.x = rankID%gridSize.x;
-      mcID.y = (rankID/gridSize.x)%gridSize.y;
-      mcID.z = rankID/(gridSize.x*gridSize.y);
-    }
-
-    inline __both__
-    int flattened_mcID(const vec3i ID, const vec3i gridSize) const {
-      return ID.x+ID.y*gridSize.x+ID.z*gridSize.x*gridSize.y;
-    }
-  };
-};
-
-struct SphericalField : public VecField {
-  struct DD : public VecField::DD {
-    inline __device__ bool sample(const vec3f P, vec3f &value) const {
-      if (!mcBounds.contains(P))
-        return false;
-
-      // Move to center:
-      const vec3f P0 = P-center;
-
-      // Compute vector in lon/lat:
-      const float r    = length(P0);
-      const float lat0 = asinf(P.z/r);
-      const float lon0 = atan2f(P.y,P.x);
-
-      // Offset by DEG degree:
-      #define DEG2RAD(X) (X)*180.f/float(M_PI)
-      const float lat1 = lat0+DEG2RAD(1.f);
-      const float lon1 = lon0+DEG2RAD(1.f);
-
-      // Back to cartesian:
-      const vec3f P1{
-        r * cosf(lat1) * cosf(lon1),
-        r * cosf(lat1) * sinf(lon1),
-        r * sinf(lat1)
-      };
-
-      // Compute vector:
-      value = P1-P0;
-
-      return true;
-    }
-
-    inline void computeBounds() {
-      worldBounds = box3f(vec3f(+1e30f),vec3f(-1e30f));
-      worldBounds.extend(center-vec3f(radius));
-      worldBounds.extend(center+vec3f(radius));
-
-      int gridSize(cbrtf(ri.commSize));
-      compute_mcID(ri.rankID,vec3i(gridSize));
-
-      vec3f mcSize = worldBounds.size()/vec3f(gridSize);
-
-      mcBounds.lower = worldBounds.lower+vec3f(mcID)*mcSize;
-      mcBounds.upper = worldBounds.lower+vec3f(mcID)*mcSize+mcSize;
-    }
-
-    inline __both__
-    int destinationID(vec3f P) const {
-      int gridSize(cbrtf(ri.commSize));
-      vec3f mcSize = worldBounds.size()/vec3f(gridSize);
-      P -= worldBounds.lower;
-      vec3f idf(P/mcSize);
-      vec3i id(idf.x,idf.y,idf.z);
-      return flattened_mcID(id,gridSize);
-    }
-
-    vec3f center;
-    float radius;
-
-    RankInfo ri;
-  };
-
-  inline DD getDD(const RankInfo &ri) {
-    DD dd;
-    dd.center = center;
-    dd.radius = radius;
-    dd.ri = ri;
-    dd.computeBounds();
-    return dd;
-  }
-
-  vec3f center;
-  float radius;
-};
 
 
 // ========================================================

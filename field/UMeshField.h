@@ -26,22 +26,19 @@ struct UMeshField : public VecField {
       auto lambda = [this,P,&hit,&value]
         (const uint32_t primID)
       {
-        //const vec3f dir(1.f);//uvw[primID];
-        value = uvw[primID];
-        hit = true;
-        return CUBQL_TERMINATE_TRAVERSAL;
-        //// Hack direction vector into w:
-        //const vec4f v0(vertices[I[0]],dir.x);
-        //const vec4f v1(vertices[I[1]],dir.y);
-        //const vec4f v2(vertices[I[2]],dir.z);
-        //const vec4f v3(vertices[I[3]],dir.x);
-        //const vec4f v4(vertices[I[4]],dir.y);
-        //const vec4f v5(vertices[I[5]],dir.z);
-        //if (intersectWedgeEXT(value,P,v0,v1,v2,v3,v4,v5)) {
-        //  printf("%f,%f,%f\n",value.x,value.y,value.z);
-        //  hit = true;
-        //  return CUBQL_TERMINATE_TRAVERSAL;
-        //}
+        const int *I = indices + cellIndices[primID];
+        const vec3f dir = uvw[primID];
+        // Hack direction vector into w:
+        const vec4f v0(vertices[I[0]],dir.x);
+        const vec4f v1(vertices[I[1]],dir.y);
+        const vec4f v2(vertices[I[2]],dir.z);
+        const vec4f v3(vertices[I[3]],dir.x);
+        const vec4f v4(vertices[I[4]],dir.y);
+        const vec4f v5(vertices[I[5]],dir.z);
+        if (intersectWedgeEXT(value,P,v0,v1,v2,v3,v4,v5)) {
+          hit = true;
+          return CUBQL_TERMINATE_TRAVERSAL;
+        }
         return CUBQL_CONTINUE_TRAVERSAL;
       };
       cuBQL::fixedBoxQuery::forEachPrim(lambda,bvh,box);

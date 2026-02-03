@@ -48,7 +48,8 @@ struct SphericalField : public VecField {
     box3f worldBounds(vec3f(+1e30f),vec3f(-1e30f));
     worldBounds.extend(center-vec3f(radius));
     worldBounds.extend(center+vec3f(radius));
-    dd.buildMCs(worldBounds,vec3i((int)cbrtf(ri.commSize)),ri);
+    float halo = radius*0.1f;
+    dd.buildMCs(worldBounds,vec3i((int)cbrtf(ri.commSize)),ri,halo);
     return dd;
   }
 

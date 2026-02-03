@@ -45,7 +45,7 @@ struct VecField {
     RankInfo ri;
 
     inline __both__
-    void buildMCs(const box3f &worldBounds, vec3i numMCs, RankInfo ri) {
+    void buildMCs(const box3f &worldBounds, vec3i numMCs, RankInfo ri, float halo=0.f) {
       this->worldBounds = worldBounds;
       this->numMCs = numMCs;
       this->ri = ri;
@@ -57,6 +57,9 @@ struct VecField {
       vec3f mcSize = worldBounds.size()/vec3f(numMCs);
       mcBounds.lower = worldBounds.lower+vec3f(mcID)*mcSize;
       mcBounds.upper = worldBounds.lower+vec3f(mcID)*mcSize+mcSize;
+
+      mcBounds.lower -= halo;
+      mcBounds.upper += halo;
     }
 
     inline __both__

@@ -47,18 +47,17 @@ struct VecField {
     RankInfo ri;
 
     inline __device__
-    int flattened_mcID(const vec3i ID, const vec3i gridSize) const {
+    int flattened_mcID(const vec3i ID) const {
       return ID.x+ID.y*numMCs.x+ID.z*numMCs.x*numMCs.y;
     }
 
     inline __device__
     int destinationID(vec3f P) const {
-      int gridSize(cbrtf(ri.commSize));
-      vec3f mcSize = worldBounds.size()/vec3f(gridSize);
+      vec3f mcSize = worldBounds.size()/vec3f(numMCs);
       P -= worldBounds.lower;
       vec3f idf(P/mcSize);
       vec3i id(idf.x,idf.y,idf.z);
-      return flattened_mcID(id,gridSize);
+      return flattened_mcID(id);
     }
 
   };

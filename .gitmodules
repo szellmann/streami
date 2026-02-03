@@ -1,3 +1,6 @@
 [submodule "submodules/rafi"]
 	path = submodules/rafi
 	url = https://github.com/ingowald/rafi.git
+[submodule "submodules/cuBQL"]
+	path = submodules/cuBQL
+	url = git@github.com:NVIDIA/cuBQL.git

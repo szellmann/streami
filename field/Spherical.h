@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include "streami.h"
+
 namespace streami {
 
 struct SphericalField : public VecField {

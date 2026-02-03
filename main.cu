@@ -5,11 +5,14 @@
 #include <iostream>
 #include <string>
 #include <vector>
+// umesh
+#include "umesh/UMesh.h"
 // rafi
 #include "rafi/implementation.h"
 // ours
 #include "streami.h"
 #include "field/Spherical.h"
+#include "field/UMeshField.h"
 
 namespace streami {
 
@@ -139,6 +142,10 @@ __global__ void update(const Field &field,
     return;
   }
 
+  if (length(P-P0) > 1e4f) {
+    return;
+  }
+
   p.P = P;
   int dest = field.destinationID(P);
   //printf("%i => %i\n",field.ri.rankID,dest);
@@ -147,16 +154,16 @@ __global__ void update(const Field &field,
   output[particleID] = p;
 }
 
-} // streami
+#define CONFIG_KERNEL(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
 
-int main(int argc, char **argv) {
-  using namespace streami;
 
-  RAFI_CUDA_CALL(Free(0));
-  RAFI_MPI_CALL(Init(&argc,&argv));
 
-  rafi::HostContext<Particle> *rafi = rafi::createContext<Particle>(MPI_COMM_WORLD, 0);
+// ========================================================
+// test/use cases:
+// ========================================================
 
+// random seeds on a procedural vector field:
+void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
   SphericalField field;
@@ -175,7 +182,6 @@ int main(int argc, char **argv) {
   Particle *output{nullptr};
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
-  #define CONFIG_KERNEL(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
   CONFIG_KERNEL(generateRandomSeeds,localN)(
       fieldDD,rafi->getDeviceInterface(),output,localN);
   rafi->forwardRays();
@@ -205,6 +211,118 @@ int main(int argc, char **argv) {
   std::cout << "Saving out to obj..\n";
   io.saveOBJ(fileName);
   std::cout << "Done.. bye!\n";
+}
+
+void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
+  using namespace streami;
+
+  if (argc < 2) {
+    std::cerr << "UMesh filename missing..\n";
+    return;
+  }
+
+  RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
+
+  umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(argv[1]);
+
+  std::vector<vec3f> vertices;
+  std::vector<int> indices;
+  std::vector<int> cellIndices;
+  std::vector<vec3f> uvw;
+
+  for (size_t i=0; i<inMesh->vertices.size(); ++i) {
+    vertices.push_back({
+      inMesh->vertices[i].x,
+      inMesh->vertices[i].y,
+      inMesh->vertices[i].z
+    });
+  }
+
+  // TODO: for now only wedges...
+
+  for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i, cellIndex+=6) {
+    indices.push_back(inMesh->wedges[i][0]);
+    indices.push_back(inMesh->wedges[i][1]);
+    indices.push_back(inMesh->wedges[i][2]);
+    indices.push_back(inMesh->wedges[i][3]);
+    indices.push_back(inMesh->wedges[i][4]);
+    indices.push_back(inMesh->wedges[i][5]);
+    cellIndices.push_back(cellIndex);
+    // u/v/w direction vectors stored in
+    // the first three vertices:
+    float u = inMesh->perVertex->values[inMesh->wedges[i][0]];
+    float v = inMesh->perVertex->values[inMesh->wedges[i][1]];
+    float w = inMesh->perVertex->values[inMesh->wedges[i][2]];
+    uvw.push_back({u,v,w});
+  }
+
+  UMeshField field(vertices.data(),
+                   indices.data(),
+                   cellIndices.data(),
+                   uvw.data(),
+                   vertices.size(),
+                   indices.size(),
+                   cellIndices.size());
+
+  UMeshField::DD fieldDD = field.getDD(ri);
+
+  int N=100000;
+  int localN=iDivUp(N,ri.commSize);
+  N *= ri.commSize;
+  rafi->resizeRayQueues(N);
+
+  // for file I/O:
+  ParticleIO io;
+  Particle *output{nullptr};
+  CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
+
+  CONFIG_KERNEL(generateRandomSeeds,localN)(
+      fieldDD,rafi->getDeviceInterface(),output,localN);
+  rafi->forwardRays();
+  io.append(output,localN);
+
+  int steps=80000;
+
+  std::cout << "Computing " << steps << " Runge-Kutta steps for "
+      << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";
+
+  int i=0;
+  for (; i<steps; ++i) {
+    if (localN) {
+      CONFIG_KERNEL(update,localN)(
+          fieldDD,rafi->getDeviceInterface(),output,localN,100.f,1.f);
+    }
+    rafi::ForwardResult result = rafi->forwardRays();
+    io.append(output,localN);
+    localN = result.numRaysInIncomingQueueThisRank;
+    std::cout << "rank " << ri.rankID << " in queue: " << localN << '\n';
+  }
+  std::cout << "Done\n";
+
+  std::string fileName = "streamlines";
+  fileName += std::to_string(ri.rankID);
+  fileName += ".obj";
+  std::cout << "Saving out to obj..\n";
+  io.saveOBJ(fileName);
+  std::cout << "Done.. bye!\n";
+}
+
+} // streami
+
+
+// ========================================================
+// main dispatch:
+// ========================================================
+
+int main(int argc, char **argv) {
+  using namespace streami;
+
+  RAFI_CUDA_CALL(Free(0));
+  RAFI_MPI_CALL(Init(&argc,&argv));
+
+  rafi::HostContext<Particle> *rafi = rafi::createContext<Particle>(MPI_COMM_WORLD, 0);
+  //main_Spherical(argc,argv,rafi);
+  main_UMesh(argc,argv,rafi);
 
   RAFI_MPI_CALL(Finalize());
 }

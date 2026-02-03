@@ -171,6 +171,9 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   field.center = vec3f(0.f);
   field.radius = 1.f;
 
+  float halo = field.radius*0.1f;
+  field.buildMCs(vec3i(cbrtf(ri.commSize)),ri,halo);
+
   SphericalField::DD fieldDD = field.getDD(ri);
 
   int N=5000;
@@ -222,6 +225,9 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     return;
   }
 
+  vec3i gridSize{1};
+  // TODO: assign macro cells
+
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
   umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(argv[1]);
@@ -264,6 +270,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                    vertices.size(),
                    indices.size(),
                    cellIndices.size());
+
+  field.buildMCs(gridSize,ri);
 
   UMeshField::DD fieldDD = field.getDD(ri);
 

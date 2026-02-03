@@ -106,9 +106,15 @@ UMeshField::~UMeshField()
   CUDA_SAFE_CALL(cudaFree(d_cellIndices));
 }
 
+box3f UMeshField::computeWorldBounds() const
+{
+  return worldBounds;
+}
+
 UMeshField::DD UMeshField::getDD(const RankInfo &ri)
 {
   DD dd;
+  (VecField::DD &)dd = VecField::getDD(ri);
   dd.vertices    = d_vertices;
   dd.indices     = d_indices;
   dd.cellIndices = d_cellIndices;
@@ -117,10 +123,6 @@ UMeshField::DD UMeshField::getDD(const RankInfo &ri)
   dd.numIndices  = numIndices;
   dd.numCells    = numCells;
   dd.bvh         = bvh;
-  // Base:
-  dd.worldBounds = worldBounds;
-  float halo = 0.f;
-  dd.buildMCs(worldBounds,vec3i(1),ri,halo);
   return dd;
 }
 

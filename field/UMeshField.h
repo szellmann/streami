@@ -61,6 +61,8 @@ struct UMeshField : public VecField {
              int numVertices, int numIndices, int numCells);
   ~UMeshField();
 
+  box3f computeWorldBounds() const override;
+
   DD getDD(const RankInfo &ri);
 
  private:

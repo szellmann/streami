@@ -8,7 +8,7 @@ namespace streami {
 struct SphericalField : public VecField {
   struct DD : public VecField::DD {
     inline __device__ bool sample(const vec3f P, vec3f &value) const {
-      if (!mcBounds.contains(P))
+      if (!mcDomain.contains(P))
         return false;
 
       // Move to center:
@@ -43,16 +43,17 @@ struct SphericalField : public VecField {
 
   inline DD getDD(const RankInfo &ri) {
     DD dd;
+    (VecField::DD &)dd = VecField::getDD(ri);
     dd.center = center;
     dd.radius = radius;
-    dd.ri = ri;
-    // Base:
+    return dd;
+  }
+
+  inline box3f computeWorldBounds() const override {
     box3f worldBounds(vec3f(+1e30f),vec3f(-1e30f));
     worldBounds.extend(center-vec3f(radius));
     worldBounds.extend(center+vec3f(radius));
-    float halo = radius*0.1f;
-    dd.buildMCs(worldBounds,vec3i((int)cbrtf(ri.commSize)),ri,halo);
-    return dd;
+    return worldBounds;
   }
 
   vec3f center;

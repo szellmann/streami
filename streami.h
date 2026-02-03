@@ -40,34 +40,18 @@ struct VecField {
     box3f worldBounds;
     vec3i numMCs;
     vec3i mcID;
+    // tight
     box3f mcBounds;
-
+    // with halos
+    box3f mcDomain;
     RankInfo ri;
 
-    inline __both__
-    void buildMCs(const box3f &worldBounds, vec3i numMCs, RankInfo ri, float halo=0.f) {
-      this->worldBounds = worldBounds;
-      this->numMCs = numMCs;
-      this->ri = ri;
-
-      mcID.x = ri.rankID%numMCs.x;
-      mcID.y = (ri.rankID/numMCs.x)%numMCs.y;
-      mcID.z = ri.rankID/(numMCs.x*numMCs.y);
-
-      vec3f mcSize = worldBounds.size()/vec3f(numMCs);
-      mcBounds.lower = worldBounds.lower+vec3f(mcID)*mcSize;
-      mcBounds.upper = worldBounds.lower+vec3f(mcID)*mcSize+mcSize;
-
-      mcBounds.lower -= halo;
-      mcBounds.upper += halo;
-    }
-
-    inline __both__
+    inline __device__
     int flattened_mcID(const vec3i ID, const vec3i gridSize) const {
       return ID.x+ID.y*numMCs.x+ID.z*numMCs.x*numMCs.y;
     }
 
-    inline __both__
+    inline __device__
     int destinationID(vec3f P) const {
       int gridSize(cbrtf(ri.commSize));
       vec3f mcSize = worldBounds.size()/vec3f(gridSize);
@@ -78,6 +62,44 @@ struct VecField {
     }
 
   };
+
+  virtual box3f computeWorldBounds() const = 0;
+
+  inline void buildMCs(vec3i numMCs, RankInfo ri, float halo=0.f) {
+    this->worldBounds = computeWorldBounds();
+    this->numMCs = numMCs;
+
+    mcID.x = ri.rankID%numMCs.x;
+    mcID.y = (ri.rankID/numMCs.x)%numMCs.y;
+    mcID.z = ri.rankID/(numMCs.x*numMCs.y);
+
+    vec3f mcSize = worldBounds.size()/vec3f(numMCs);
+    mcBounds.lower = worldBounds.lower+vec3f(mcID)*mcSize;
+    mcBounds.upper = worldBounds.lower+vec3f(mcID)*mcSize+mcSize;
+
+    mcDomain = mcBounds;
+    mcDomain.lower -= halo;
+    mcDomain.upper += halo;
+  }
+
+  inline DD getDD(const RankInfo &ri) {
+    DD dd;
+    dd.worldBounds = worldBounds;
+    dd.numMCs      = numMCs;
+    dd.mcID        = mcID;
+    dd.mcBounds    = mcBounds;
+    dd.mcDomain    = mcDomain;
+    dd.ri          = ri;
+    return dd;
+  }
+
+  box3f worldBounds;
+  vec3i numMCs;
+  vec3i mcID;
+  // tight
+  box3f mcBounds;
+  // with halos
+  box3f mcDomain;
 };
 
 } // streami

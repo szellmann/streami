@@ -26,26 +26,9 @@ struct UMeshField : public VecField {
       auto lambda = [this,P,&hit,&value]
         (const uint32_t primID)
       {
-        if (primID >= numCells) {
-          printf("????\n");
-          return CUBQL_TERMINATE_TRAVERSAL;
-        }
-        if (cellIndices[primID] >= numIndices) {
-          printf("!!!!\n");
-          return CUBQL_TERMINATE_TRAVERSAL;
-        }
-        const int *I = indices+cellIndices[primID];
-        if (I[0] >= numVertices ||
-            I[1] >= numVertices ||
-            I[2] >= numVertices ||
-            I[3] >= numVertices ||
-            I[4] >= numVertices ||
-            I[5] >= numVertices) {
-          printf("oof\n");
-          return CUBQL_TERMINATE_TRAVERSAL;
-        }
         //const vec3f dir(1.f);//uvw[primID];
         value = uvw[primID];
+        hit = true;
         return CUBQL_TERMINATE_TRAVERSAL;
         //// Hack direction vector into w:
         //const vec4f v0(vertices[I[0]],dir.x);

@@ -225,12 +225,32 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     return;
   }
 
+  umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(argv[1]);
+
   vec3i gridSize{1};
-  // TODO: assign macro cells
+  for (int i=2;i<argc;i++) {
+    std::string arg(argv[i]);
+    if (arg[0] == '-') {
+      if (arg == "-gx") {
+        gridSize.x = std::stoi(argv[++i]);
+      }
+      if (arg == "-gy") {
+        gridSize.y = std::stoi(argv[++i]);
+      }
+      if (arg == "-gz") {
+        gridSize.z = std::stoi(argv[++i]);
+      }
+    }
+  }
 
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
-  umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(argv[1]);
+  int numMCs = gridSize.x*gridSize.y*gridSize.z;
+  if (numMCs != ri.commSize) {
+    std::cerr << "# macro cells (" << numMCs << ") and # MPI ranks ("
+        << ri.commSize << ") don't match..\n";
+    return;
+  }
 
   std::vector<vec3f> vertices;
   std::vector<int> indices;

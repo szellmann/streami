@@ -115,34 +115,33 @@ __global__ void update(const Field &field,
   if (isnan(P0.x) || isnan(P0.y) || isnan(P0.z))
     return;
 
-  bool valid{true};
   vec3f k1;
-  valid &= field.sample(P0,k1);
+  if (!field.sample(P0,k1))
+    return;
   k1 *= stepSize;
   const vec3f P1 = P0+k1*0.5f;
 
   vec3f k2;
-  valid &= field.sample(P1,k2);
+  if (!field.sample(P1,k2))
+    return;
   k2 *= stepSize;
   const vec3f P2 = P0+k2*0.5f;
 
   vec3f k3;
-  valid &= field.sample(P2,k3);
+  if (!field.sample(P2,k3))
+    return;
   k3 *= stepSize;
   const vec3f P3 = P0+k3;
 
   vec3f k4;
-  valid &= field.sample(P3,k4);
+  if (!field.sample(P3,k4))
+    return;
   k4 *= stepSize;
   
   const vec3f P = P0 + 1/6.f*(k1+2.f*k2+2.f*k3+k4);
   //printf("%i => %f,%f,%f\n",field.ri.rankID,P.x,P.y,P.z);
 
   if (!field.worldBounds.contains(P) || length(P-P0) < minLength) {
-    return;
-  }
-
-  if (length(P-P0) > 1e4f) {
     return;
   }
 

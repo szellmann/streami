@@ -217,20 +217,6 @@ namespace streami {
                                 const vec4f _v4,
                                 const vec4f _v5)
   {
-#if 1
-    box3f bb(vec3f(FLT_MAX),vec3f(-FLT_MAX));
-    bb.extend(vec3f(_v0));
-    bb.extend(vec3f(_v1));
-    bb.extend(vec3f(_v2));
-    bb.extend(vec3f(_v3));
-    bb.extend(vec3f(_v4));
-    bb.extend(vec3f(_v5));
-    if (bb.contains(P)) {
-      value = {_v0.w,_v1.w,_v2.w};
-      return true;
-    }
-    return false;
-#else
 
     #define WEDGE_DIVERGED               1e6
     #define WEDGE_MAX_ITERATION          10
@@ -244,6 +230,13 @@ namespace streami {
     for (int i=0; i<6; ++i) {
       bbox.extend(vec3f(V[i]));
     }
+#if 1
+    if (bbox.contains(P)) {
+      value = {_v0.w,_v1.w,_v2.w};
+      return true;
+    }
+    return false;
+#endif
 
     const float determinantTolerance = norm2(bbox.size()) * 1e-6f;
 
@@ -324,7 +317,6 @@ namespace streami {
     }
 
     return false;
-#endif
   }
 
 

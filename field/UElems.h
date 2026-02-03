@@ -230,13 +230,6 @@ namespace streami {
     for (int i=0; i<6; ++i) {
       bbox.extend(vec3f(V[i]));
     }
-#if 1
-    if (bbox.contains(P)) {
-      value = {_v0.w,_v1.w,_v2.w};
-      return true;
-    }
-    return false;
-#endif
 
     const float determinantTolerance = norm2(bbox.size()) * 1e-6f;
 

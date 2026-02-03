@@ -153,7 +153,9 @@ __global__ void update(const Field &field,
   output[particleID] = p;
 }
 
-#define CONFIG_KERNEL(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
+#define CONFIG_KERNEL_512(kernel,n) kernel<<<iDivUp(n,512),512>>>
+#define CONFIG_KERNEL_1024(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
+#define CONFIG_KERNEL CONFIG_KERNEL_1024
 
 
 
@@ -280,7 +282,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   rafi->forwardRays();
   io.append(output,localN);
 
-  int steps=80000;
+  int steps=100000;
 
   std::cout << "Computing " << steps << " Runge-Kutta steps for "
       << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";
@@ -288,7 +290,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   int i=0;
   for (; i<steps; ++i) {
     if (localN) {
-      CONFIG_KERNEL(update,localN)(
+      CONFIG_KERNEL_512(update,localN)(
           fieldDD,rafi->getDeviceInterface(),output,localN,100.f,1.f);
     }
     rafi::ForwardResult result = rafi->forwardRays();

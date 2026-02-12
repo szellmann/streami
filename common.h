@@ -36,6 +36,8 @@
 # define __both__ __host__ __device__
 #endif
 
+#include <mpi.h>
+
 // ours
 #include "vecmath.h"
 
@@ -137,6 +139,30 @@ inline void cuda_safe_call(
 {
   if (code != cudaSuccess) {
     fprintf(stderr, "CUDA error: %s %s:%i\n", cudaGetErrorString(code), file, line);
+    if (fatal)
+      exit(code);
+  }
+}
+
+
+// ==================================================================
+// mpi call
+// ==================================================================
+
+#ifndef NDEBUG
+#define MPI_SAFE_CALL(FUNC) { mpi_safe_call((FUNC), __FILE__, __LINE__); }
+#else
+#define MPI_SAFE_CALL(FUNC) FUNC
+#endif
+#define MPI_SAFE_CALL_X(FUNC) { mpi_safe_call((FUNC), __FILE__, __LINE__, true); }
+
+inline void mpi_safe_call(int code, const char *file, int line, bool fatal=false)
+{
+  if (code != MPI_SUCCESS) {
+    char errStr[MPI_MAX_ERROR_STRING];
+    int len;
+    MPI_Error_string(code, errStr, &len);
+    fprintf(stderr, "MPI error: %s %s:%i\n", errStr, file, line);
     if (fatal)
       exit(code);
   }

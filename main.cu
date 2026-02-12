@@ -369,6 +369,11 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     io.append(output,localN);
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "rank " << ri.rankID << " in queue: " << localN << '\n';
+
+    int globalN = 0;
+    MPI_SAFE_CALL(MPI_Allreduce(&localN,&globalN,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD));
+    if (globalN == 0)
+      break;
   }
   std::cout << "Done\n";
 

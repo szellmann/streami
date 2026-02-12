@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.29.2)
+cmake_minimum_required(VERSION 3.26.5)
 project(streami LANGUAGES C CXX CUDA)
 
 find_package(umesh REQUIRED)

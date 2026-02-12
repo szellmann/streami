@@ -247,12 +247,20 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
-  int numMCs = gridSize.x*gridSize.y*gridSize.z;
-  if (numMCs != ri.commSize) {
-    std::cerr << "# macro cells (" << numMCs << ") and # MPI ranks ("
+  int mcCount = gridSize.x*gridSize.y*gridSize.z;
+  if (mcCount != ri.commSize) {
+    std::cerr << "# macro cells (" << mcCount << ") and # MPI ranks ("
         << ri.commSize << ") don't match..\n";
     return;
   }
+
+  auto umeshBounds = inMesh->getBounds();
+  box3f worldBounds{
+    {umeshBounds.lower.x,umeshBounds.lower.y,umeshBounds.lower.z},
+    {umeshBounds.upper.x,umeshBounds.upper.y,umeshBounds.upper.z}
+  };
+
+  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri);
 
   std::vector<vec3f> vertices;
   std::vector<int> indices;
@@ -270,12 +278,25 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   // TODO: for now only wedges...
 
   for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i, cellIndex+=6) {
-    indices.push_back(inMesh->wedges[i][0]);
-    indices.push_back(inMesh->wedges[i][1]);
-    indices.push_back(inMesh->wedges[i][2]);
-    indices.push_back(inMesh->wedges[i][3]);
-    indices.push_back(inMesh->wedges[i][4]);
-    indices.push_back(inMesh->wedges[i][5]);
+    int I[6];
+    memcpy(I,&inMesh->wedges[i][0],sizeof(I));
+
+    bool ours = false;
+    for (int j=0; j<6; ++j) {
+      if (localMC.domain.contains(vertices[I[j]])) {
+        ours = true;
+        break;
+      }
+    }
+
+    if (!ours) continue;
+
+    indices.push_back(I[0]);
+    indices.push_back(I[1]);
+    indices.push_back(I[2]);
+    indices.push_back(I[3]);
+    indices.push_back(I[4]);
+    indices.push_back(I[5]);
     cellIndices.push_back(cellIndex);
     // u/v/w direction vectors stored in
     // the first three vertices:
@@ -294,7 +315,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                    cellIndices.size());
 
   field.numMCs = gridSize;
-  field.mc = makeMacroCell(field.computeWorldBounds(),field.numMCs,ri);
+  field.mc = localMC;
 
   UMeshField::DD fieldDD = field.getDD(ri);
 

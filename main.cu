@@ -260,7 +260,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     {umeshBounds.upper.x,umeshBounds.upper.y,umeshBounds.upper.z}
   };
 
-  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri);
+  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,worldBounds.size().x/10.f);
 
   std::vector<vec3f> vertices;
   std::vector<int> indices;

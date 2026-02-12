@@ -89,9 +89,9 @@ __global__ void generateRandomSeeds(const Field &field,
   Random rand(particleID,numParticles);
   Particle p;
   p.ID = numParticles*field.ri.rankID+particleID;
-  p.P.x = rand()*field.mcBounds.size().x+field.mcBounds.lower.x;
-  p.P.y = rand()*field.mcBounds.size().y+field.mcBounds.lower.y;
-  p.P.z = rand()*field.mcBounds.size().z+field.mcBounds.lower.z;
+  p.P.x = rand()*field.mc.bounds.size().x+field.mc.bounds.lower.x;
+  p.P.y = rand()*field.mc.bounds.size().y+field.mc.bounds.lower.y;
+  p.P.z = rand()*field.mc.bounds.size().z+field.mc.bounds.lower.z;
   rafi.emitOutgoing(p,field.ri.rankID); // only on ours!
   //printf("%i -- %f,%f,%f\n",field.ri.rankID,P0.x,P0.y,P0.z);
   // for dumping:
@@ -171,8 +171,10 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   field.center = vec3f(0.f);
   field.radius = 1.f;
 
+  field.numMCs = (int)cbrtf(ri.commSize);
+
   float halo = field.radius*0.1f;
-  field.buildMCs(vec3i(cbrtf(ri.commSize)),ri,halo);
+  field.mc = makeMacroCell(field.computeWorldBounds(),field.numMCs,ri,halo);
 
   SphericalField::DD fieldDD = field.getDD(ri);
 
@@ -291,7 +293,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                    indices.size(),
                    cellIndices.size());
 
-  field.buildMCs(gridSize,ri);
+  field.numMCs = gridSize;
+  field.mc = makeMacroCell(field.computeWorldBounds(),field.numMCs,ri);
 
   UMeshField::DD fieldDD = field.getDD(ri);
 

@@ -8,7 +8,7 @@ namespace streami {
 struct SphericalField : public VecField {
   struct DD : public VecField::DD {
     inline __device__ bool sample(const vec3f P, vec3f &value) const {
-      if (!mcDomain.contains(P))
+      if (!mc.domain.contains(P))
         return false;
 
       // Move to center:

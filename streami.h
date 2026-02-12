@@ -32,6 +32,41 @@ struct RankInfo {
 };
 
 // ========================================================
+// Macrocell
+// ========================================================
+
+struct MacroCell {
+  vec3i mcID;
+  // tight
+  box3f bounds;
+  // with halos
+  box3f domain;
+};
+
+inline
+MacroCell makeMacroCell(const box3f worldBounds,
+                        vec3i numMCs,
+                        RankInfo ri,
+                        float halo=0.f)
+{
+  MacroCell mc;
+
+  mc.mcID.x = ri.rankID%numMCs.x;
+  mc.mcID.y = (ri.rankID/numMCs.x)%numMCs.y;
+  mc.mcID.z = ri.rankID/(numMCs.x*numMCs.y);
+
+  vec3f mcSize = worldBounds.size()/vec3f(numMCs);
+  mc.bounds.lower = worldBounds.lower+vec3f(mc.mcID)*mcSize;
+  mc.bounds.upper = worldBounds.lower+vec3f(mc.mcID)*mcSize+mcSize;
+
+  mc.domain = mc.bounds;
+  mc.domain.lower -= halo;
+  mc.domain.upper += halo;
+
+  return mc;
+}
+
+// ========================================================
 // Fields
 // ========================================================
 
@@ -39,11 +74,7 @@ struct VecField {
   struct DD {
     box3f worldBounds;
     vec3i numMCs;
-    vec3i mcID;
-    // tight
-    box3f mcBounds;
-    // with halos
-    box3f mcDomain;
+    MacroCell mc;
     RankInfo ri;
 
     inline __device__
@@ -64,41 +95,17 @@ struct VecField {
 
   virtual box3f computeWorldBounds() const = 0;
 
-  inline void buildMCs(vec3i numMCs, RankInfo ri, float halo=0.f) {
-    this->worldBounds = computeWorldBounds();
-    this->numMCs = numMCs;
-
-    mcID.x = ri.rankID%numMCs.x;
-    mcID.y = (ri.rankID/numMCs.x)%numMCs.y;
-    mcID.z = ri.rankID/(numMCs.x*numMCs.y);
-
-    vec3f mcSize = worldBounds.size()/vec3f(numMCs);
-    mcBounds.lower = worldBounds.lower+vec3f(mcID)*mcSize;
-    mcBounds.upper = worldBounds.lower+vec3f(mcID)*mcSize+mcSize;
-
-    mcDomain = mcBounds;
-    mcDomain.lower -= halo;
-    mcDomain.upper += halo;
-  }
-
   inline DD getDD(const RankInfo &ri) {
     DD dd;
-    dd.worldBounds = worldBounds;
+    dd.worldBounds = computeWorldBounds();
     dd.numMCs      = numMCs;
-    dd.mcID        = mcID;
-    dd.mcBounds    = mcBounds;
-    dd.mcDomain    = mcDomain;
+    dd.mc          = mc;
     dd.ri          = ri;
     return dd;
   }
 
-  box3f worldBounds;
   vec3i numMCs;
-  vec3i mcID;
-  // tight
-  box3f mcBounds;
-  // with halos
-  box3f mcDomain;
+  MacroCell mc;
 };
 
 } // streami

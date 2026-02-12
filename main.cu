@@ -267,29 +267,42 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   std::vector<int> cellIndices;
   std::vector<vec3f> uvw;
 
-  for (size_t i=0; i<inMesh->vertices.size(); ++i) {
-    vertices.push_back({
-      inMesh->vertices[i].x,
-      inMesh->vertices[i].y,
-      inMesh->vertices[i].z
-    });
-  }
+  std::vector<int> old2new(inMesh->vertices.size(),-1);
 
-  // TODO: for now only wedges...
-
-  for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i, cellIndex+=6) {
-    int I[6];
-    memcpy(I,&inMesh->wedges[i][0],sizeof(I));
-
+  for (size_t i=0; i<inMesh->wedges.size(); ++i) {
     bool ours = false;
     for (int j=0; j<6; ++j) {
-      if (localMC.domain.contains(vertices[I[j]])) {
+      int vertID = inMesh->wedges[i][j];
+      auto vv = inMesh->vertices[vertID];
+      vec3f v(vv.x,vv.y,vv.z);
+      if (localMC.domain.contains(v)) {
         ours = true;
         break;
       }
     }
 
     if (!ours) continue;
+
+    for (int j=0; j<6; ++j) {
+      int vertID = inMesh->wedges[i][j];
+      auto vv = inMesh->vertices[vertID];
+      vec3f v(vv.x,vv.y,vv.z);
+      if (old2new[vertID] < 0) {
+        old2new[vertID] = (int)vertices.size();
+        vertices.push_back(v);
+      }
+    }
+  }
+
+  // TODO: for now only wedges...
+
+  for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i) {
+    int I[6];
+    for (int j=0; j<6; ++j) {
+      I[j] = old2new[inMesh->wedges[i][j]];
+    }
+    if (I[0]<0 || I[1]<0 || I[2]<0 || I[3]<0 || I[4]<0 || I[5]<0) // not ours!
+      continue;
 
     indices.push_back(I[0]);
     indices.push_back(I[1]);
@@ -298,6 +311,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     indices.push_back(I[4]);
     indices.push_back(I[5]);
     cellIndices.push_back(cellIndex);
+    cellIndex += 6;
     // u/v/w direction vectors stored in
     // the first three vertices:
     float u = inMesh->perVertex->values[inMesh->wedges[i][0]];
@@ -305,6 +319,12 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     float w = inMesh->perVertex->values[inMesh->wedges[i][2]];
     uvw.push_back({u,v,w});
   }
+
+  std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
+    << " out of " << inMesh->vertices.size() << " vertices\n";
+
+  std::cout << "rank #" << ri.rankID << " gets " << uvw.size()
+    << " out of " << inMesh->wedges.size() << " wedge cells\n";
 
   UMeshField field(vertices.data(),
                    indices.data(),

@@ -78,7 +78,7 @@ struct ParticleIO {
 // ========================================================
 
 template<typename Field>
-__global__ void generateRandomSeeds(const Field &field,
+__global__ void generateRandomSeeds(const Field field,
                                     rafi::DeviceInterface<Particle> rafi,
                                     Particle *output, // to dump to file
                                     int numParticles)
@@ -99,7 +99,7 @@ __global__ void generateRandomSeeds(const Field &field,
 }
 
 template<typename Field>
-__global__ void update(const Field &field,
+__global__ void update(const Field field,
                        rafi::DeviceInterface<Particle> rafi,
                        Particle *output, // to dump to file
                        int numParticles,

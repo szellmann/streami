@@ -79,9 +79,9 @@ UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, vec3f *u
 
   computeBounds<<<iDivUp(numCells,1024),1024>>>(primBounds,
                                                 dWorldBounds,
-                                                vertices,
-                                                indices,
-                                                cellIndices,
+                                                d_vertices,
+                                                d_indices,
+                                                d_cellIndices,
                                                 numCells);
 
   CUDA_SAFE_CALL(cudaMemcpy(&worldBounds,dWorldBounds,sizeof(worldBounds),

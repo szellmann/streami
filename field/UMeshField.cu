@@ -8,9 +8,9 @@ __global__ void computeBounds(box3f *primBounds,
                               const vec3f *vertices,
                               const int *indices,
                               const int *cellIndices,
-                              int numCells)
+                              size_t numCells)
 {
-  int cellID = threadIdx.x+blockIdx.x*blockDim.x;
+  size_t cellID = threadIdx.x+blockIdx.x*blockDim.x;
   if (cellID >= numCells) return;
 
   const int *I = indices + cellIndices[cellID];
@@ -40,7 +40,7 @@ __global__ void computeBounds(box3f *primBounds,
 }
 
 UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, vec3f *uvw,
-                       int numVertices, int numIndices, int numCells)
+                       size_t numVertices, size_t numIndices, size_t numCells)
   : numVertices(numVertices), numIndices(numIndices), numCells(numCells)
 {
   CUDA_SAFE_CALL(cudaMalloc(&d_vertices, sizeof(vertices[0])*numVertices));

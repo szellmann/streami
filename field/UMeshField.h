@@ -58,7 +58,7 @@ struct UMeshField : public VecField {
 
   /* host interface for field */
   UMeshField(vec3f *vertices, int *indices, int *cellIndices, vec3f *uvw,
-             int numVertices, int numIndices, int numCells);
+             size_t numVertices, size_t numIndices, size_t numCells);
   ~UMeshField();
 
   box3f computeWorldBounds() const override;
@@ -70,9 +70,9 @@ struct UMeshField : public VecField {
   int   *d_indices{nullptr};
   int   *d_cellIndices{nullptr};
   vec3f *d_uvw{nullptr};
-  int numVertices{0};
-  int numIndices{0};
-  int numCells{0};
+  size_t numVertices{0ull};
+  size_t numIndices{0ull};
+  size_t numCells{0ull};
   bvh_t bvh = {0,0,0,0};
   box3f worldBounds;
 };

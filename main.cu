@@ -236,6 +236,8 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   float minlength = 1e-3f;
   float stepsize = 1.f;
+  int steps=1000;
+
 
   for (int i=2;i<argc;i++) {
     std::string arg(argv[i]);
@@ -264,6 +266,9 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
       if (arg == "-minlength") {
         minlength = atof(argv[++i]);
+      }
+      if (arg == "-numsteps") {
+        steps = std::stoi(argv[++i]);
       }
     }
   }
@@ -311,8 +316,6 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       fieldDD,rafi->getDeviceInterface(),output,localN);
   rafi->forwardRays();
   io.append(output,localN);
-
-  int steps=100000;
 
   std::cout << "Computing " << steps << " Runge-Kutta steps for "
       << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";

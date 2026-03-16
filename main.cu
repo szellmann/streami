@@ -233,6 +233,10 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   vec3i org{0};
   vec3i dims{0}; // input dims
   vec3i gridSize{1};
+
+  float minlength = 1e-3f;
+  float stepsize = 1.f;
+
   for (int i=2;i<argc;i++) {
     std::string arg(argv[i]);
     if (arg[0] == '-') {
@@ -254,6 +258,12 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
       if (arg == "-gz") {
         gridSize.z = std::stoi(argv[++i]);
+      }
+      if (arg == "-stepsize") {
+        stepsize = atof(argv[++i]);
+      }
+      if (arg == "-minlength") {
+        minlength = atof(argv[++i]);
       }
     }
   }
@@ -311,7 +321,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   for (; i<steps; ++i) {
     if (localN) {
       CONFIG_KERNEL_512(update,localN)(
-          fieldDD,rafi->getDeviceInterface(),output,localN,100.f,1.f);
+          fieldDD,rafi->getDeviceInterface(),output,localN,stepsize,minlength);
     }
     rafi::ForwardResult result = rafi->forwardRays();
     io.append(output,localN);

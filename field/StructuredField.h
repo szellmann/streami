@@ -28,7 +28,7 @@ struct StructuredField : public VecField {
   };
 
   /* host interface for field */
-  StructuredField(vec3f *values, vec3i dims, vec3i org);
+  StructuredField(vec3f *values, vec3i dims, vec3i org = {0,0,0});
   ~StructuredField();
 
   box3f computeWorldBounds() const override;

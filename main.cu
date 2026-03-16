@@ -281,7 +281,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
 
-  StructuredField field(values.data(),org,dims);
+  StructuredField field(values.data(),dims,org);
   field.numMCs = gridSize;
   field.mc = localMC;
 

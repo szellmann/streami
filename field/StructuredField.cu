@@ -4,7 +4,7 @@
 namespace streami {
 
 StructuredField::StructuredField(vec3f *values, vec3i dims, vec3i org)
-  : org(org), dims(dims)
+  : dims(dims), org(org)
 {
   size_t numVoxels = dims.x*size_t(dims.y)*dims.z;
   CUDA_SAFE_CALL(cudaMalloc(&d_values,sizeof(d_values[0])*numVoxels));

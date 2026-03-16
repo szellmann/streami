@@ -5,6 +5,7 @@
 
 // std
 #include <iostream>
+#include <stdint.h>
 #include <stdio.h>
 
 // os

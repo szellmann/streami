@@ -12,6 +12,7 @@
 // ours
 #include "streami.h"
 #include "field/Spherical.h"
+#include "field/StructuredField.h"
 #include "field/UMeshField.h"
 
 namespace streami {
@@ -219,6 +220,119 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   std::cout << "Done.. bye!\n";
 }
 
+void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
+  using namespace streami;
+
+  if (argc < 2) {
+    std::cerr << "UMesh filename missing..\n";
+    return;
+  }
+
+  std::ifstream in(argv[1]);
+
+  vec3i org{0};
+  vec3i dims{0}; // input dims
+  vec3i gridSize{1};
+  for (int i=2;i<argc;i++) {
+    std::string arg(argv[i]);
+    if (arg[0] == '-') {
+      if (arg == "-dims") {
+        dims.x = std::stoi(argv[++i]);
+        dims.y = std::stoi(argv[++i]);
+        dims.z = std::stoi(argv[++i]);
+      }
+      if (arg == "-org") {
+        org.x = std::stoi(argv[++i]);
+        org.y = std::stoi(argv[++i]);
+        org.z = std::stoi(argv[++i]);
+      }
+      if (arg == "-gx") {
+        gridSize.x = std::stoi(argv[++i]);
+      }
+      if (arg == "-gy") {
+        gridSize.y = std::stoi(argv[++i]);
+      }
+      if (arg == "-gz") {
+        gridSize.z = std::stoi(argv[++i]);
+      }
+    }
+  }
+
+  if (dims.x*dims.y*dims.z == 0) {
+    std::cerr << "must specify input dimensions (-dims x y z)\n";
+    return;
+  }
+
+  RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
+
+  int mcCount = gridSize.x*gridSize.y*gridSize.z;
+  if (mcCount != ri.commSize) {
+    std::cerr << "# macro cells (" << mcCount << ") and # MPI ranks ("
+        << ri.commSize << ") don't match..\n";
+    return;
+  }
+
+  box3f worldBounds{
+    {(float)org.x,(float)org.y,(float)org.z},
+    {(float)dims.x,(float)dims.y,(float)dims.z}
+  };
+
+  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,0/*to-do: halo*/);
+
+  std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
+
+  StructuredField field(values.data(),org,dims);
+  field.numMCs = gridSize;
+  field.mc = localMC;
+
+  StructuredField::DD fieldDD = field.getDD(ri);
+
+  int N=100000;
+  int localN=iDivUp(N,ri.commSize);
+  N *= ri.commSize;
+  rafi->resizeRayQueues(N);
+
+  // for file I/O:
+  ParticleIO io;
+  Particle *output{nullptr};
+  CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
+
+  CONFIG_KERNEL(generateRandomSeeds,localN)(
+      fieldDD,rafi->getDeviceInterface(),output,localN);
+  rafi->forwardRays();
+  io.append(output,localN);
+
+  int steps=100000;
+
+  std::cout << "Computing " << steps << " Runge-Kutta steps for "
+      << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";
+
+  int i=0;
+  for (; i<steps; ++i) {
+    if (localN) {
+      CONFIG_KERNEL_512(update,localN)(
+          fieldDD,rafi->getDeviceInterface(),output,localN,100.f,1.f);
+    }
+    rafi::ForwardResult result = rafi->forwardRays();
+    io.append(output,localN);
+    localN = result.numRaysInIncomingQueueThisRank;
+    std::cout << "rank " << ri.rankID << " in queue: " << localN << '\n';
+
+    int globalN = 0;
+    MPI_SAFE_CALL(MPI_Allreduce(&localN,&globalN,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD));
+    if (globalN == 0)
+      break;
+  }
+  std::cout << "Done\n";
+
+  std::string fileName = "streamlines";
+  fileName += std::to_string(ri.rankID);
+  fileName += ".obj";
+  std::cout << "Saving out to obj..\n";
+  io.saveOBJ(fileName);
+  std::cout << "Done.. bye!\n";
+}
+
 void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   using namespace streami;
 
@@ -400,7 +514,8 @@ int main(int argc, char **argv) {
 
   rafi::HostContext<Particle> *rafi = rafi::createContext<Particle>(MPI_COMM_WORLD, 0);
   //main_Spherical(argc,argv,rafi);
-  main_UMesh(argc,argv,rafi);
+  //main_UMesh(argc,argv,rafi);
+  main_RAW(argc,argv,rafi);
 
   RAFI_MPI_CALL(Finalize());
 }

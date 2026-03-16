@@ -295,6 +295,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,0/*to-do: halo*/);
 
   std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
+  in.read((char *)values.data(),sizeof(values[0])*values.size());
 
   StructuredField field(values.data(),dims,org);
   field.numMCs = gridSize;

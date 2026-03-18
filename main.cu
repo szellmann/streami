@@ -248,6 +248,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   float minlength = 1e-3f;
   float stepsize = 1.f;
   int steps=1000;
+  int numParticles=100000;
   float halo = 0.f;
   bool verbose=false;
   box3f roi(vec3f(FLT_MAX),vec3f(-FLT_MAX));
@@ -279,6 +280,9 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
       if (arg == "-minlength") {
         minlength = atof(argv[++i]);
+      }
+      if (arg == "-numparticles") {
+        numParticles = std::stoi(argv[++i]);
       }
       if (arg == "-numsteps") {
         steps = std::stoi(argv[++i]);
@@ -330,7 +334,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   StructuredField::DD fieldDD = field.getDD(ri);
 
-  int N=100000;
+  int N=numParticles;
   int localN=iDivUp(N,ri.commSize);
   N *= ri.commSize;
   rafi->resizeRayQueues(N);

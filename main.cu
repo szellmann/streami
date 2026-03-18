@@ -105,7 +105,8 @@ __global__ void update(const Field field,
                        Particle *output, // to dump to file
                        int numParticles,
                        float stepSize,
-                       float minLength)
+                       float minLength,
+                       box1f *magnitudeRange=0/*for diagnostic*/)
 {
   int particleID = threadIdx.x+blockIdx.x*blockDim.x;
   if (particleID >= numParticles) return;
@@ -141,6 +142,11 @@ __global__ void update(const Field field,
   
   const vec3f P = P0 + 1/6.f*(k1+2.f*k2+2.f*k3+k4);
   //printf("%i => %f,%f,%f\n",field.ri.rankID,P.x,P.y,P.z);
+
+  if (magnitudeRange) {
+    atomicMin(&magnitudeRange->lower,length(P-P0));
+    atomicMax(&magnitudeRange->upper,length(P-P0));
+  }
 
   if (!field.worldBounds.contains(P) || length(P-P0) < minLength) {
     return;
@@ -327,8 +333,20 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   int i=0;
   for (; i<steps; ++i) {
     if (localN) {
+// #define PRINTRANGE
+#ifdef PRINTRANGE
+      box1f *magrange;
+      CUDA_SAFE_CALL(cudaMalloc(&magrange,sizeof(box1f)));
+      box1f hrange(FLT_MAX,-FLT_MAX);
+      CUDA_SAFE_CALL(cudaMemcpy(magrange,&hrange,sizeof(hrange),cudaMemcpyHostToDevice));
+#endif
       CONFIG_KERNEL_512(update,localN)(
-          fieldDD,rafi->getDeviceInterface(),output,localN,stepsize,minlength);
+          fieldDD,rafi->getDeviceInterface(),output,localN,stepsize,minlength,magrange);
+#ifdef PRINTRANGE
+      CUDA_SAFE_CALL(cudaMemcpy(&hrange,magrange,sizeof(hrange),cudaMemcpyDeviceToHost));
+      CUDA_SAFE_CALL(cudaFree(magrange));
+      std::cout << "magnitude range: " << hrange << '\n';
+#endif
     }
     rafi::ForwardResult result = rafi->forwardRays();
     io.append(output,localN);

@@ -11,6 +11,9 @@ struct SphericalField : public VecField {
       if (!mc.domain.contains(P))
         return false;
 
+      if (!worldBounds.contains(P))
+        return false;
+
       // Move to center:
       const vec3f P0 = P-center;
 

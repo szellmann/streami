@@ -237,7 +237,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   float minlength = 1e-3f;
   float stepsize = 1.f;
   int steps=1000;
-
+  float halo = 0.f;
 
   for (int i=2;i<argc;i++) {
     std::string arg(argv[i]);
@@ -270,6 +270,9 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       if (arg == "-numsteps") {
         steps = std::stoi(argv[++i]);
       }
+      if (arg == "-halo") {
+        halo = atof(argv[++i]);
+      }
     }
   }
 
@@ -292,7 +295,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     {(float)dims.x,(float)dims.y,(float)dims.z}
   };
 
-  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,0/*to-do: halo*/);
+  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,halo);
 
   std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
   in.read((char *)values.data(),sizeof(values[0])*values.size());

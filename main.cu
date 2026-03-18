@@ -82,17 +82,22 @@ template<typename Field>
 __global__ void generateRandomSeeds(const Field field,
                                     rafi::DeviceInterface<Particle> rafi,
                                     Particle *output, // to dump to file
-                                    int numParticles)
+                                    int numParticles,
+                                    box3f *roi=nullptr)
 {
   int particleID = threadIdx.x+blockIdx.x*blockDim.x;
   if (particleID >= numParticles) return;
 
   Random rand(particleID,numParticles);
   Particle p;
-  p.ID = numParticles*field.ri.rankID+particleID;
-  p.P.x = rand()*field.mc.bounds.size().x+field.mc.bounds.lower.x;
-  p.P.y = rand()*field.mc.bounds.size().y+field.mc.bounds.lower.y;
-  p.P.z = rand()*field.mc.bounds.size().z+field.mc.bounds.lower.z;
+  do {
+    p.ID = numParticles*field.ri.rankID+particleID;
+    p.P.x = rand()*field.mc.bounds.size().x+field.mc.bounds.lower.x;
+    p.P.y = rand()*field.mc.bounds.size().y+field.mc.bounds.lower.y;
+    p.P.z = rand()*field.mc.bounds.size().z+field.mc.bounds.lower.z;
+    if (!roi) break;
+    if (roi->contains(p.P)) break;
+  } while (true);
   rafi.emitOutgoing(p,field.ri.rankID); // only on ours!
   //printf("%i -- %f,%f,%f\n",field.ri.rankID,P0.x,P0.y,P0.z);
   // for dumping:
@@ -245,6 +250,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   int steps=1000;
   float halo = 0.f;
   bool verbose=false;
+  box3f roi(vec3f(FLT_MAX),vec3f(-FLT_MAX));
 
   for (int i=2;i<argc;i++) {
     std::string arg(argv[i]);
@@ -279,6 +285,14 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
       if (arg == "-halo") {
         halo = atof(argv[++i]);
+      }
+      if (arg == "-roi") {
+        roi.lower.x = atof(argv[++i]);
+        roi.lower.y = atof(argv[++i]);
+        roi.lower.z = atof(argv[++i]);
+        roi.upper.x = atof(argv[++i]);
+        roi.upper.y = atof(argv[++i]);
+        roi.upper.z = atof(argv[++i]);
       }
       if (arg == "-v") {
         verbose = true;
@@ -326,8 +340,16 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   Particle *output{nullptr};
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
+  box3f *d_roi=nullptr;
+  if (!roi.empty()) {
+    CUDA_SAFE_CALL(cudaMalloc(&d_roi,sizeof(box3f)));
+    CUDA_SAFE_CALL(cudaMemcpy(d_roi,&roi,sizeof(roi),cudaMemcpyHostToDevice));
+  }
   CONFIG_KERNEL(generateRandomSeeds,localN)(
-      fieldDD,rafi->getDeviceInterface(),output,localN);
+      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi);
+  if (d_roi) {
+    CUDA_SAFE_CALL(cudaFree(d_roi));
+  }
   rafi->forwardRays();
   io.append(output,localN);
 

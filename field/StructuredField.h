@@ -10,7 +10,10 @@ struct StructuredField : public VecField {
     inline __device__ bool sample(const vec3f P, vec3f &value) const {
       if (!mc.domain.contains(P))
         return false;
-     
+    
+      if (!worldBounds.contains(P))
+        return false;
+
       int px(P.x);
       int py(P.y);
       int pz(P.z);

@@ -244,6 +244,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   float stepsize = 1.f;
   int steps=1000;
   float halo = 0.f;
+  bool verbose=false;
 
   for (int i=2;i<argc;i++) {
     std::string arg(argv[i]);
@@ -278,6 +279,9 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
       if (arg == "-halo") {
         halo = atof(argv[++i]);
+      }
+      if (arg == "-v") {
+        verbose = true;
       }
     }
   }
@@ -333,20 +337,21 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   int i=0;
   for (; i<steps; ++i) {
     if (localN) {
-// #define PRINTRANGE
-#ifdef PRINTRANGE
-      box1f *magrange;
-      CUDA_SAFE_CALL(cudaMalloc(&magrange,sizeof(box1f)));
+      box1f *magrange=nullptr;
       box1f hrange(FLT_MAX,-FLT_MAX);
-      CUDA_SAFE_CALL(cudaMemcpy(magrange,&hrange,sizeof(hrange),cudaMemcpyHostToDevice));
-#endif
+      if (verbose) {
+        CUDA_SAFE_CALL(cudaMalloc(&magrange,sizeof(box1f)));
+        CUDA_SAFE_CALL(cudaMemcpy(magrange,&hrange,sizeof(hrange),cudaMemcpyHostToDevice));
+      }
+
       CONFIG_KERNEL_512(update,localN)(
           fieldDD,rafi->getDeviceInterface(),output,localN,stepsize,minlength,magrange);
-#ifdef PRINTRANGE
-      CUDA_SAFE_CALL(cudaMemcpy(&hrange,magrange,sizeof(hrange),cudaMemcpyDeviceToHost));
-      CUDA_SAFE_CALL(cudaFree(magrange));
-      std::cout << "magnitude range: " << hrange << '\n';
-#endif
+
+      if (verbose) {
+        CUDA_SAFE_CALL(cudaMemcpy(&hrange,magrange,sizeof(hrange),cudaMemcpyDeviceToHost));
+        CUDA_SAFE_CALL(cudaFree(magrange));
+        std::cout << "magnitude range: " << hrange << '\n';
+      }
     }
     rafi::ForwardResult result = rafi->forwardRays();
     io.append(output,localN);

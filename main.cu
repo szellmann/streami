@@ -141,10 +141,17 @@ __global__ void generateRandomSeeds(const Field field,
   int particleID = threadIdx.x+blockIdx.x*blockDim.x;
   if (particleID >= numParticles) return;
 
-  Random rand(particleID,numParticles);
   Particle p;
+  p.ID = numParticles*field.ri.rankID+particleID;
+
+  if (roi && !roi->overlaps(field.mc.bounds)) {
+    p.P = {NAN,NAN,NAN};
+    output[particleID] = p;
+    return;
+  }
+
+  Random rand(particleID,numParticles);
   do {
-    p.ID = numParticles*field.ri.rankID+particleID;
     p.P.x = rand()*field.mc.bounds.size().x+field.mc.bounds.lower.x;
     p.P.y = rand()*field.mc.bounds.size().y+field.mc.bounds.lower.y;
     p.P.z = rand()*field.mc.bounds.size().z+field.mc.bounds.lower.z;

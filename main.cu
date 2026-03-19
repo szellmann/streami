@@ -18,7 +18,10 @@
 namespace streami {
 
 struct {
-  box3f roi{vec3f{1e20f},vec3f{-1e20f}};
+  struct {
+    box3f bounds{vec3f{1e20f},vec3f{-1e20f}};
+    bool isSpherical{false};
+  } roi;
 } g_appState;
 
 
@@ -176,7 +179,8 @@ __global__ void generateRandomSeeds(const Field field,
                                     rafi::DeviceInterface<Particle> rafi,
                                     Particle *output, // to dump to file
                                     int numParticles,
-                                    box3f *roi=nullptr)
+                                    box3f *roi=nullptr,
+                                    bool roiIsSpherical=false)
 {
   int particleID = threadIdx.x+blockIdx.x*blockDim.x;
   if (particleID >= numParticles) return;
@@ -184,7 +188,7 @@ __global__ void generateRandomSeeds(const Field field,
   Particle p;
   p.ID = numParticles*field.ri.rankID+particleID;
 
-  if (roi && !roi->overlaps(field.mc.bounds)) {
+  if (roi && !roiIsSpherical && !roi->overlaps(field.mc.bounds)) {
     p.P = {NAN,NAN,NAN};
     output[particleID] = p;
     return;
@@ -196,7 +200,14 @@ __global__ void generateRandomSeeds(const Field field,
     p.P.y = rand()*field.mc.bounds.size().y+field.mc.bounds.lower.y;
     p.P.z = rand()*field.mc.bounds.size().z+field.mc.bounds.lower.z;
     if (!roi) break;
-    if (roi->contains(p.P)) break;
+    if (roiIsSpherical) {
+      float r = length(p.P);
+      float lat = asinf(p.P.z/r);
+      float lon = atan2f(p.P.y, p.P.x);
+      if (roi->contains({r,lat,lon})) break;
+    } else {
+      if (roi->contains(p.P)) break;
+    }
   } while (true);
   rafi.emitOutgoing(p,field.ri.rankID); // only on ours!
   //printf("%i -- %f,%f,%f\n",field.ri.rankID,P0.x,P0.y,P0.z);
@@ -301,15 +312,15 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
   box3f *d_roi=nullptr;
-  if (!g_appState.roi.empty()) {
+  if (!g_appState.roi.bounds.empty()) {
     CUDA_SAFE_CALL(cudaMalloc(&d_roi,sizeof(box3f)));
     CUDA_SAFE_CALL(cudaMemcpy(d_roi,
-                              &g_appState.roi,
-                              sizeof(g_appState.roi),
+                              &g_appState.roi.bounds,
+                              sizeof(g_appState.roi.bounds),
                               cudaMemcpyHostToDevice));
   }
   CONFIG_KERNEL(generateRandomSeeds,localN)(
-      fieldDD,rafi->getDeviceInterface(),output,localN);
+      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -462,15 +473,15 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
   box3f *d_roi=nullptr;
-  if (!g_appState.roi.empty()) {
+  if (!g_appState.roi.bounds.empty()) {
     CUDA_SAFE_CALL(cudaMalloc(&d_roi,sizeof(box3f)));
     CUDA_SAFE_CALL(cudaMemcpy(d_roi,
-                              &g_appState.roi,
-                              sizeof(g_appState.roi),
+                              &g_appState.roi.bounds,
+                              sizeof(g_appState.roi.bounds),
                               cudaMemcpyHostToDevice));
   }
   CONFIG_KERNEL(generateRandomSeeds,localN)(
-      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi);
+      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -652,7 +663,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   UMeshField::DD fieldDD = field.getDD(ri);
 
-  int N=100000;
+  int N=300000;
   int localN=iDivUp(N,ri.commSize);
   N = localN*ri.commSize;
   rafi->resizeRayQueues(N);
@@ -663,15 +674,15 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
   box3f *d_roi=nullptr;
-  if (!g_appState.roi.empty()) {
+  if (!g_appState.roi.bounds.empty()) {
     CUDA_SAFE_CALL(cudaMalloc(&d_roi,sizeof(box3f)));
     CUDA_SAFE_CALL(cudaMemcpy(d_roi,
-                              &g_appState.roi,
-                              sizeof(g_appState.roi),
+                              &g_appState.roi.bounds,
+                              sizeof(g_appState.roi.bounds),
                               cudaMemcpyHostToDevice));
   }
   CONFIG_KERNEL(generateRandomSeeds,localN)(
-      fieldDD,rafi->getDeviceInterface(),output,localN);
+      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -719,6 +730,9 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   fileName += ".obj";
   std::cout << "Saving out to obj..\n";
   io.saveOBJ(fileName);
+  if (ri.rankID == 0) {
+    globalIO.saveOBJ("all.obj",true);
+  }
   std::cout << "Done.. bye!\n";
 }
 
@@ -739,12 +753,22 @@ int main(int argc, char **argv) {
     std::string arg(argv[i]);
     if (arg[0] == '-') {
       if (arg == "-roi") {
-        g_appState.roi.lower.x = atof(argv[++i]);
-        g_appState.roi.lower.y = atof(argv[++i]);
-        g_appState.roi.lower.z = atof(argv[++i]);
-        g_appState.roi.upper.x = atof(argv[++i]);
-        g_appState.roi.upper.y = atof(argv[++i]);
-        g_appState.roi.upper.z = atof(argv[++i]);
+        g_appState.roi.bounds.lower.x = atof(argv[++i]);
+        g_appState.roi.bounds.lower.y = atof(argv[++i]);
+        g_appState.roi.bounds.lower.z = atof(argv[++i]);
+        g_appState.roi.bounds.upper.x = atof(argv[++i]);
+        g_appState.roi.bounds.upper.y = atof(argv[++i]);
+        g_appState.roi.bounds.upper.z = atof(argv[++i]);
+        g_appState.roi.isSpherical = false;
+      }
+      if (arg == "-spherical-roi") {
+        g_appState.roi.bounds.lower.x = atof(argv[++i]);
+        g_appState.roi.bounds.lower.y = atof(argv[++i]);
+        g_appState.roi.bounds.lower.z = atof(argv[++i]);
+        g_appState.roi.bounds.upper.x = atof(argv[++i]);
+        g_appState.roi.bounds.upper.y = atof(argv[++i]);
+        g_appState.roi.bounds.upper.z = atof(argv[++i]);
+        g_appState.roi.isSpherical = true;
       }
     }
   }

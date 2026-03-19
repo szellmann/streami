@@ -310,6 +310,35 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   std::cout << "Done.. bye!\n";
 }
 
+static
+std::vector<Particle> gatherAllParticles(
+    RankInfo ri, const int N, const int localN, const Particle *output) {
+  std::vector<Particle> allParticles(N);
+  if (ri.rankID == 0) {
+    for (int rID=1; rID<ri.commSize; ++rID) {
+      int otherN;
+      MPI_SAFE_CALL(MPI_Recv(&otherN,1,MPI_INT,rID,0,MPI_COMM_WORLD,0));
+      std::vector<Particle> otherParticles(otherN);
+      MPI_SAFE_CALL(MPI_Recv(otherParticles.data(),
+                             otherParticles.size()*sizeof(otherParticles[0]),
+                             MPI_BYTE,
+                             rID,0,MPI_COMM_WORLD,0));
+    }
+  } else {
+    MPI_SAFE_CALL(MPI_Send(&localN,1,MPI_INT,0,0,MPI_COMM_WORLD));
+    std::vector<Particle> thisGen(localN);
+    CUDA_SAFE_CALL(cudaMemcpy(thisGen.data(),
+                              output,
+                              sizeof(output[0])*localN,
+                              cudaMemcpyDefault));
+    MPI_SAFE_CALL(MPI_Send(thisGen.data(),
+                           thisGen.size()*sizeof(thisGen[0]),
+                           MPI_BYTE,
+                           0,0,MPI_COMM_WORLD));
+  }
+  return allParticles;
+}
+
 void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   using namespace streami;
 
@@ -410,7 +439,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   rafi->resizeRayQueues(N);
 
   // for file I/O:
-  ParticleIO io;
+  ParticleIO io, globalIO;
   Particle *output{nullptr};
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
@@ -432,8 +461,10 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   rafi->forwardRays();
   io.append(output,localN,colors.data(),colors.size());
 
-  std::cout << "Computing " << steps << " Runge-Kutta steps for "
-      << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";
+  if (ri.rankID == 0) {
+    auto all = gatherAllParticles(ri,N,localN,output);
+    globalIO.append(all.data(),all.size(),colors.data(),colors.size());
+  }
 
   int i=0;
   for (; i<steps; ++i) {
@@ -459,8 +490,14 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "STEP " << i << ", rank " << ri.rankID << " in queue: " << localN << '\n';
 
-    int globalN = 0;
+    int globalN = result.numRaysAliveAcrossAllRanks;
     MPI_SAFE_CALL(MPI_Allreduce(&localN,&globalN,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD));
+
+    if (ri.rankID == 0) {
+      auto all = gatherAllParticles(ri,N,localN,output);
+      globalIO.append(all.data(),all.size(),colors.data(),colors.size());
+    }
+
     if (globalN == 0)
       break;
   }
@@ -471,6 +508,9 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   fileName += ".obj";
   std::cout << "Saving out to obj..\n";
   io.saveOBJ(fileName,true);
+  if (ri.rankID == 0) {
+    globalIO.saveOBJ("all.obj",true);
+  }
   std::cout << "Done.. bye!\n";
 }
 

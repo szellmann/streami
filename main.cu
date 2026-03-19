@@ -17,6 +17,11 @@
 
 namespace streami {
 
+struct {
+  box3f roi{vec3f{1e20f},vec3f{-1e20f}};
+} g_appState;
+
+
 // ========================================================
 // Helper class, writes particles to obj file:
 // ========================================================
@@ -260,8 +265,19 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   Particle *output{nullptr};
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
+  box3f *d_roi=nullptr;
+  if (!g_appState.roi.empty()) {
+    CUDA_SAFE_CALL(cudaMalloc(&d_roi,sizeof(box3f)));
+    CUDA_SAFE_CALL(cudaMemcpy(d_roi,
+                              &g_appState.roi,
+                              sizeof(g_appState.roi),
+                              cudaMemcpyHostToDevice));
+  }
   CONFIG_KERNEL(generateRandomSeeds,localN)(
       fieldDD,rafi->getDeviceInterface(),output,localN);
+  if (d_roi) {
+    CUDA_SAFE_CALL(cudaFree(d_roi));
+  }
 
   auto colors = randomColorsPerID(N);
   rafi->forwardRays();
@@ -314,7 +330,6 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   int numParticles=100000;
   float halo = 0.f;
   bool verbose=false;
-  box3f roi(vec3f(FLT_MAX),vec3f(-FLT_MAX));
 
   for (int i=2;i<argc;i++) {
     std::string arg(argv[i]);
@@ -352,14 +367,6 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
       if (arg == "-halo") {
         halo = atof(argv[++i]);
-      }
-      if (arg == "-roi") {
-        roi.lower.x = atof(argv[++i]);
-        roi.lower.y = atof(argv[++i]);
-        roi.lower.z = atof(argv[++i]);
-        roi.upper.x = atof(argv[++i]);
-        roi.upper.y = atof(argv[++i]);
-        roi.upper.z = atof(argv[++i]);
       }
       if (arg == "-v") {
         verbose = true;
@@ -408,9 +415,12 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
   box3f *d_roi=nullptr;
-  if (!roi.empty()) {
+  if (!g_appState.roi.empty()) {
     CUDA_SAFE_CALL(cudaMalloc(&d_roi,sizeof(box3f)));
-    CUDA_SAFE_CALL(cudaMemcpy(d_roi,&roi,sizeof(roi),cudaMemcpyHostToDevice));
+    CUDA_SAFE_CALL(cudaMemcpy(d_roi,
+                              &g_appState.roi,
+                              sizeof(g_appState.roi),
+                              cudaMemcpyHostToDevice));
   }
   CONFIG_KERNEL(generateRandomSeeds,localN)(
       fieldDD,rafi->getDeviceInterface(),output,localN,d_roi);
@@ -594,8 +604,20 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   Particle *output{nullptr};
   CUDA_SAFE_CALL(cudaMalloc(&output,sizeof(Particle)*N));
 
+  box3f *d_roi=nullptr;
+  if (!g_appState.roi.empty()) {
+    CUDA_SAFE_CALL(cudaMalloc(&d_roi,sizeof(box3f)));
+    CUDA_SAFE_CALL(cudaMemcpy(d_roi,
+                              &g_appState.roi,
+                              sizeof(g_appState.roi),
+                              cudaMemcpyHostToDevice));
+  }
   CONFIG_KERNEL(generateRandomSeeds,localN)(
       fieldDD,rafi->getDeviceInterface(),output,localN);
+  if (d_roi) {
+    CUDA_SAFE_CALL(cudaFree(d_roi));
+  }
+
   rafi->forwardRays();
   io.append(output,localN);
 
@@ -642,6 +664,20 @@ int main(int argc, char **argv) {
 
   RAFI_CUDA_CALL(Free(0));
   RAFI_MPI_CALL(Init(&argc,&argv));
+
+  for (int i=1;i<argc;i++) {
+    std::string arg(argv[i]);
+    if (arg[0] == '-') {
+      if (arg == "-roi") {
+        g_appState.roi.lower.x = atof(argv[++i]);
+        g_appState.roi.lower.y = atof(argv[++i]);
+        g_appState.roi.lower.z = atof(argv[++i]);
+        g_appState.roi.upper.x = atof(argv[++i]);
+        g_appState.roi.upper.y = atof(argv[++i]);
+        g_appState.roi.upper.z = atof(argv[++i]);
+      }
+    }
+  }
 
   rafi::HostContext<Particle> *rafi = rafi::createContext<Particle>(MPI_COMM_WORLD, 0);
   //main_Spherical(argc,argv,rafi);

@@ -312,8 +312,17 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
 static
 std::vector<Particle> gatherAllParticles(
-    RankInfo ri, const int N, const int localN, const Particle *output) {
-  std::vector<Particle> allParticles(N);
+    RankInfo ri, const int N, const int localN, const Particle *output)
+{
+  MPI_SAFE_CALL(MPI_Send(&localN,1,MPI_INT,0,0,MPI_COMM_WORLD));
+  std::vector<Particle> thisGen(localN);
+  CUDA_SAFE_CALL(cudaMemcpy(thisGen.data(),
+                            output,
+                            sizeof(output[0])*localN,
+                            cudaMemcpyDefault));
+
+  std::vector<Particle> allParticles = thisGen;
+
   if (ri.rankID == 0) {
     for (int rID=1; rID<ri.commSize; ++rID) {
       int otherN;
@@ -323,14 +332,12 @@ std::vector<Particle> gatherAllParticles(
                              otherParticles.size()*sizeof(otherParticles[0]),
                              MPI_BYTE,
                              rID,0,MPI_COMM_WORLD,0));
+      allParticles.insert(allParticles.end(),
+                          otherParticles.begin(),
+                          otherParticles.end());
     }
   } else {
     MPI_SAFE_CALL(MPI_Send(&localN,1,MPI_INT,0,0,MPI_COMM_WORLD));
-    std::vector<Particle> thisGen(localN);
-    CUDA_SAFE_CALL(cudaMemcpy(thisGen.data(),
-                              output,
-                              sizeof(output[0])*localN,
-                              cudaMemcpyDefault));
     MPI_SAFE_CALL(MPI_Send(thisGen.data(),
                            thisGen.size()*sizeof(thisGen[0]),
                            MPI_BYTE,

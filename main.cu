@@ -99,6 +99,31 @@ struct ParticleIO {
 };
 
 
+// ========================================================
+// Other helpers
+// ========================================================
+
+__host__ __device__
+inline vec3f randomColor(unsigned idx)
+{
+  unsigned int r = (unsigned int)(idx*13*17 + 0x234235);
+  unsigned int g = (unsigned int)(idx*7*3*5 + 0x773477);
+  unsigned int b = (unsigned int)(idx*11*19 + 0x223766);
+  return vec3f{(r&255)/255.f,
+               (g&255)/255.f,
+               (b&255)/255.f};
+}
+
+static
+std::vector<vec3f> randomColorsPerID(size_t length)
+{
+  std::vector<vec3f> result(length);
+  for (size_t i=0; i<length; ++i) {
+    result[i] = randomColor((unsigned)i);
+  }
+  return result;
+}
+
 
 // ========================================================
 // Kernels
@@ -243,7 +268,8 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
           fieldDD,rafi->getDeviceInterface(),output,localN,0.1f,1e-10f);
     }
     rafi::ForwardResult result = rafi->forwardRays();
-    io.append(output,localN);
+    auto colors = randomColorsPerID(localN);
+    io.append(output,colors.data(),localN);
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "rank " << ri.rankID << " in queue: " << localN << '\n';
   }
@@ -253,7 +279,7 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   fileName += std::to_string(ri.rankID);
   fileName += ".obj";
   std::cout << "Saving out to obj..\n";
-  io.saveOBJ(fileName);
+  io.saveOBJ(fileName,true);
   std::cout << "Done.. bye!\n";
 }
 
@@ -406,7 +432,8 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
     }
     rafi::ForwardResult result = rafi->forwardRays();
-    io.append(output,localN);
+    auto colors = randomColorsPerID(localN);
+    io.append(output,colors.data(),localN);
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "STEP " << i << ", rank " << ri.rankID << " in queue: " << localN << '\n';
 
@@ -421,7 +448,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   fileName += std::to_string(ri.rankID);
   fileName += ".obj";
   std::cout << "Saving out to obj..\n";
-  io.saveOBJ(fileName);
+  io.saveOBJ(fileName,true);
   std::cout << "Done.. bye!\n";
 }
 

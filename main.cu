@@ -314,7 +314,6 @@ static
 std::vector<Particle> gatherAllParticles(
     RankInfo ri, const int N, const int localN, const Particle *output)
 {
-  MPI_SAFE_CALL(MPI_Send(&localN,1,MPI_INT,0,0,MPI_COMM_WORLD));
   std::vector<Particle> thisGen(localN);
   CUDA_SAFE_CALL(cudaMemcpy(thisGen.data(),
                             output,
@@ -468,8 +467,8 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   rafi->forwardRays();
   io.append(output,localN,colors.data(),colors.size());
 
+  auto all = gatherAllParticles(ri,N,localN,output);
   if (ri.rankID == 0) {
-    auto all = gatherAllParticles(ri,N,localN,output);
     globalIO.append(all.data(),all.size(),colors.data(),colors.size());
   }
 
@@ -500,8 +499,8 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     int globalN = result.numRaysAliveAcrossAllRanks;
     MPI_SAFE_CALL(MPI_Allreduce(&localN,&globalN,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD));
 
+    auto all = gatherAllParticles(ri,N,localN,output);
     if (ri.rankID == 0) {
-      auto all = gatherAllParticles(ri,N,localN,output);
       globalIO.append(all.data(),all.size(),colors.data(),colors.size());
     }
 

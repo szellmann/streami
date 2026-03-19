@@ -30,10 +30,12 @@ struct ParticleIO {
   std::vector<Line> lines;
 
   void append(const Particle *particles, int numParticles) {
-    append(particles,nullptr,numParticles);
+    append(particles,numParticles,nullptr,0);
   }
 
-  void append(const Particle *particles, const vec3f *colors, int numParticles) {
+  void append(const Particle *particles, int numParticles,
+              const vec3f *colors, int numColors)
+  {
     if (numParticles <= 0)
       return;
 
@@ -49,10 +51,10 @@ struct ParticleIO {
 
     std::vector<vec3f> thisGenColors;
     if (colors != nullptr) {
-      thisGenColors.resize(numParticles);
+      thisGenColors.resize(numColors);
       CUDA_SAFE_CALL(cudaMemcpy(thisGenColors.data(),
                                 colors,
-                                sizeof(colors[0])*numParticles,
+                                sizeof(colors[0])*numColors,
                                 cudaMemcpyDefault));
     }
 
@@ -243,7 +245,7 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   int N=5000;
   int localN=iDivUp(N,ri.commSize);
-  N *= ri.commSize;
+  N = localN*ri.commSize;
   rafi->resizeRayQueues(N);
 
   // for file I/O:
@@ -253,8 +255,10 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   CONFIG_KERNEL(generateRandomSeeds,localN)(
       fieldDD,rafi->getDeviceInterface(),output,localN);
+
+  auto colors = randomColorsPerID(N);
   rafi->forwardRays();
-  io.append(output,localN);
+  io.append(output,localN,colors.data(),colors.size());
 
   int steps=1000;
 
@@ -268,8 +272,8 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
           fieldDD,rafi->getDeviceInterface(),output,localN,0.1f,1e-10f);
     }
     rafi::ForwardResult result = rafi->forwardRays();
-    auto colors = randomColorsPerID(localN);
-    io.append(output,colors.data(),localN);
+    auto colors = randomColorsPerID(N);
+    io.append(output,localN,colors.data(),colors.size());
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "rank " << ri.rankID << " in queue: " << localN << '\n';
   }
@@ -388,7 +392,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   int N=numParticles;
   int localN=iDivUp(N,ri.commSize);
-  N *= ri.commSize;
+  N = localN*ri.commSize;
   rafi->resizeRayQueues(N);
 
   // for file I/O:
@@ -406,8 +410,10 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
+
+  auto colors = randomColorsPerID(N);
   rafi->forwardRays();
-  io.append(output,localN);
+  io.append(output,localN,colors.data(),colors.size());
 
   std::cout << "Computing " << steps << " Runge-Kutta steps for "
       << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";
@@ -432,8 +438,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
     }
     rafi::ForwardResult result = rafi->forwardRays();
-    auto colors = randomColorsPerID(localN);
-    io.append(output,colors.data(),localN);
+    io.append(output,localN,colors.data(),colors.size());
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "STEP " << i << ", rank " << ri.rankID << " in queue: " << localN << '\n';
 
@@ -574,7 +579,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   int N=100000;
   int localN=iDivUp(N,ri.commSize);
-  N *= ri.commSize;
+  N = localN*ri.commSize;
   rafi->resizeRayQueues(N);
 
   // for file I/O:

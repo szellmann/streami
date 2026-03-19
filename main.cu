@@ -22,10 +22,18 @@ namespace streami {
 // ========================================================
 
 struct ParticleIO {
-  typedef std::vector<Particle> Line;
+  struct Vertex {
+    Particle p;
+    vec3f color;
+  };
+  typedef std::vector<Vertex> Line;
   std::vector<Line> lines;
 
   void append(const Particle *particles, int numParticles) {
+    append(particles,nullptr,numParticles);
+  }
+
+  void append(const Particle *particles, const vec3f *colors, int numParticles) {
     if (numParticles <= 0)
       return;
 
@@ -39,23 +47,41 @@ struct ParticleIO {
 
     lines.resize(std::max((int)lines.size(),thisGen.back().ID+1));
 
+    std::vector<vec3f> thisGenColors;
+    if (colors != nullptr) {
+      thisGenColors.resize(numParticles);
+      CUDA_SAFE_CALL(cudaMemcpy(thisGenColors.data(),
+                                colors,
+                                sizeof(colors[0])*numParticles,
+                                cudaMemcpyDefault));
+    }
+
     for (int i=0; i<numParticles; ++i) {
       assert(lines.size() > thisGen[i].ID);
-      lines[thisGen[i].ID].push_back(thisGen[i]);
+      vec3f color
+          = thisGenColors.empty() ? vec3f(0.0f) : thisGenColors[thisGen[i].ID];
+      lines[thisGen[i].ID].push_back({thisGen[i],color});
     }
   }
 
-  void saveOBJ(std::string fileName) {
+  void saveOBJ(std::string fileName, bool withColor=false) {
     std::ofstream out(fileName);
     std::vector<std::vector<int>> IDs;
     int vID=1;
     for (int i=0; i<lines.size(); ++i) {
       IDs.emplace_back();
       for (int j=0; j<lines[i].size(); ++j) {
-        const vec3f P = lines[i][j].P;
+        const vec3f P = lines[i][j].p.P;
         if (isnan(P.x) || isnan(P.y) || isnan(P.z))
           break;
-        out << "v " << P.x << ' ' << P.y << ' ' << P.z << '\n';
+        out << "v " << P.x << ' ' << P.y << ' ' << P.z;
+        if (withColor) {
+          const vec3f color = lines[i][j].color;
+          out << ' ' << (uint32_t)(255.f*clamp(color.x,0.f,1.f))
+              << ' ' << (uint32_t)(255.f*clamp(color.y,0.f,1.f))
+              << ' ' << (uint32_t)(255.f*clamp(color.z,0.f,1.f));
+        }
+        out << '\n';
         IDs[i].push_back(vID++);
       }
     }

@@ -27,6 +27,7 @@ struct {
   anari::SpatialField field{nullptr};
   anari::Volume volume{nullptr};
   anari::Geometry roiGeom{nullptr};
+  box1f valueRange{0.f,1.f};
 } g_appState;
 
 // ========================================================
@@ -93,26 +94,22 @@ static anari::World generateScene(anari::Device device,
   std::vector<anari::math::float3> colors;
   std::vector<float> opacities;
 
-  auto lut = g_appState.transfunc.getLUT();
-  for (int i=0; i<lut.size(); ++i) {
-    colors.push_back(*(anari::math::float3 *)&lut[i].xyz);
-    opacities.push_back(lut[i].w);
-  }
-
-  anari::setAndReleaseParameter(device,
-      volume,
-      "color",
-      anari::newArray1D(device, colors.data(), colors.size()));
-  anari::setAndReleaseParameter(device,
-      volume,
-      "opacity",
-      anari::newArray1D(device, opacities.data(), opacities.size()));
+  //anari::setAndReleaseParameter(device,
+  //    volume,
+  //    "color",
+  //    anari::newArray1D(device, colors.data(), colors.size()));
+  //anari::setAndReleaseParameter(device,
+  //    volume,
+  //    "opacity",
+  //    anari::newArray1D(device, opacities.data(), opacities.size()));
   anari::math::float2 voxelRange(minValue,maxValue);
   anariSetParameter(
       device, volume, "valueRange", ANARI_FLOAT32_BOX1, &voxelRange);
   float unitDistance{0.02f};
   anariSetParameter(
       device, volume, "unitDistance", ANARI_FLOAT32, &unitDistance);
+
+  g_appState.valueRange = {voxelRange.x,voxelRange.y};
 
   anari::commitParameters(device, volume);
 
@@ -220,17 +217,6 @@ int main(int argc, char *argv[]) {
 
   Pipeline pl(argc, argv, "ex00_hello_dvr_course");
 
-  if (!pl.transfuncValid()) {
-    auto &tf = g_appState.transfunc;
-    std::vector<vec4f> tfValues({
-      {0.f,0.f,1.f,0.1f },
-      {0.f,1.f,0.f,0.1f }
-    });
-    tf.valueRange = {0.f,1.f};
-    tf.setLUT(tfValues);
-    pl.setTransfunc(&tf);
-  }
-
   std::string fileName;
   vec3i org, dims;
   for (int i=1;i<argc;i++) {
@@ -268,6 +254,17 @@ int main(int argc, char *argv[]) {
   auto device = anari::newDevice(library, "default");
 
   auto world = generateScene(device,values,org,dims);
+
+  if (!pl.transfuncValid()) {
+    auto &tf = g_appState.transfunc;
+    std::vector<vec4f> tfValues({
+      {0.f,0.f,1.f,0.1f },
+      {0.f,1.f,0.f,0.1f }
+    });
+    tf.valueRange = g_appState.valueRange;
+    tf.setLUT(tfValues);
+    pl.setTransfunc(&tf);
+  }
 
   pl.setTransfuncUpdateHandler([&](const Transfunc *tf,int) {
     updateLUT(device,*tf);

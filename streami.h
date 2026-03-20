@@ -3,6 +3,7 @@
 
 // std
 #include <memory>
+#include <vector>
 // mpi
 #include <mpi.h>
 // ours
@@ -149,6 +150,12 @@ struct Tracer {
     } roi;
   };
 
+  struct Vertex {
+    Particle p;
+    vec3f color;
+  };
+  typedef std::vector<Vertex> Line;
+
   Tracer(Context &ctx, const Params &p);
 
   void setField(const VecField::SP &field);
@@ -159,13 +166,17 @@ struct Tracer {
 
   void trace();
 
+  std::vector<Line> getLines();
+
  private:
   void init();
+  void appendOutput();
 
   Context &context;
   Params params;
   VecField::SP field;
-  VecField::DD fieldDD;
+
+  std::vector<Line> hLines;
 
   int globalN, localN;
   Particle *dOutput{nullptr};

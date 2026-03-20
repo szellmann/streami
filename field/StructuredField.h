@@ -6,6 +6,8 @@ namespace streami {
 
 struct StructuredField : public VecField {
 
+  typedef std::shared_ptr<StructuredField> SP;
+
   struct DD : public VecField::DD {
     inline __device__ bool sample(const vec3f P, vec3f &value) const {
       if (!mc.domain.contains(P))

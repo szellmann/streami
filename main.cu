@@ -219,15 +219,20 @@ __global__ void generateRandomSeeds(const Field field,
   output[particleID] = p;
 }
 
-void call_generateRandomSeeds_StructuredField(const VecField::DD field,
+void call_generateRandomSeeds_StructuredField(const VecField::SP field,
                                               rafi::DeviceInterface<Particle> rafi,
                                               Particle *output, // to dump to file
                                               int numParticles,
                                               box3f *roi=nullptr,
                                               bool roiIsSpherical=false)
 {
+  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
+
+  const StructuredField::SP &sfield = (const StructuredField::SP &)field;
+  const StructuredField::DD &fieldDD = sfield->getDD(ri);
+
   CONFIG_KERNEL(generateRandomSeeds,numParticles)(
-      (const StructuredField::DD &)field,rafi,output,numParticles,roi,g_appState.roi.isSpherical);
+      fieldDD,rafi,output,numParticles,roi,g_appState.roi.isSpherical);
 }
 
 template<typename Field>
@@ -291,7 +296,7 @@ __global__ void update(const Field field,
   output[particleID] = p;
 }
 
-void call_update_StructuredField(const VecField::DD field,
+void call_update_StructuredField(const VecField::SP field,
                                  rafi::DeviceInterface<Particle> rafi,
                                  Particle *output, // to dump to file
                                  int numParticles,
@@ -299,8 +304,13 @@ void call_update_StructuredField(const VecField::DD field,
                                  float minLength,
                                  box1f *magnitudeRange=0/*for diagnostic*/)
 {
+  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
+
+  const StructuredField::SP &sfield = (const StructuredField::SP &)field;
+  const StructuredField::DD &fieldDD = sfield->getDD(ri);
+
   CONFIG_KERNEL(update,numParticles)(
-      (const StructuredField::DD &)field,rafi,output,numParticles,stepSize,minLength);
+      fieldDD,rafi,output,numParticles,stepSize,minLength,0);
 }
 
 

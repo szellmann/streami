@@ -19,10 +19,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 target_include_directories(${PROJECT_NAME} PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE STREAMI_APP=1)
 
 add_library(${PROJECT_NAME}_library)
 target_sources(${PROJECT_NAME}_library PRIVATE
-    main.cu field/UMeshField.cu field/StructuredField.cu)
+    main.cu streami.cu field/UMeshField.cu field/StructuredField.cu)
 target_link_libraries(${PROJECT_NAME}_library PUBLIC
   dvr_course-common
   rafi

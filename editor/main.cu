@@ -215,6 +215,8 @@ static void updateLUT(anari::Device device, const Transfunc &tf) {
 
 int main(int argc, char *argv[]) {
 
+  streami::Context ctx(argc, argv);
+
   Pipeline pl(argc, argv, "ex00_hello_dvr_course");
 
   std::string fileName;

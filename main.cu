@@ -15,6 +15,10 @@
 #include "field/StructuredField.h"
 #include "field/UMeshField.h"
 
+#define CONFIG_KERNEL_512(kernel,n) kernel<<<iDivUp(n,512),512>>>
+#define CONFIG_KERNEL_1024(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
+#define CONFIG_KERNEL CONFIG_KERNEL_1024
+
 namespace streami {
 
 struct {
@@ -215,6 +219,17 @@ __global__ void generateRandomSeeds(const Field field,
   output[particleID] = p;
 }
 
+void call_generateRandomSeeds_StructuredField(const VecField::DD field,
+                                              rafi::DeviceInterface<Particle> rafi,
+                                              Particle *output, // to dump to file
+                                              int numParticles,
+                                              box3f *roi=nullptr,
+                                              bool roiIsSpherical=false)
+{
+  CONFIG_KERNEL(generateRandomSeeds,numParticles)(
+      (const StructuredField::DD &)field,rafi,output,numParticles,roi,g_appState.roi.isSpherical);
+}
+
 template<typename Field>
 __global__ void update(const Field field,
                        rafi::DeviceInterface<Particle> rafi,
@@ -276,9 +291,17 @@ __global__ void update(const Field field,
   output[particleID] = p;
 }
 
-#define CONFIG_KERNEL_512(kernel,n) kernel<<<iDivUp(n,512),512>>>
-#define CONFIG_KERNEL_1024(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
-#define CONFIG_KERNEL CONFIG_KERNEL_1024
+void call_update_StructuredField(const VecField::DD field,
+                                 rafi::DeviceInterface<Particle> rafi,
+                                 Particle *output, // to dump to file
+                                 int numParticles,
+                                 float stepSize,
+                                 float minLength,
+                                 box1f *magnitudeRange=0/*for diagnostic*/)
+{
+  CONFIG_KERNEL(update,numParticles)(
+      (const StructuredField::DD &)field,rafi,output,numParticles,stepSize,minLength);
+}
 
 
 
@@ -743,6 +766,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 // main dispatch:
 // ========================================================
 
+#ifdef STREAMI_APP
 int main(int argc, char **argv) {
   using namespace streami;
 
@@ -780,6 +804,7 @@ int main(int argc, char **argv) {
 
   RAFI_MPI_CALL(Finalize());
 }
+#endif
 
 
 

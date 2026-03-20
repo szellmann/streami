@@ -1,9 +1,18 @@
 
 #pragma once
 
+// std
+#include <memory>
+// mpi
+#include <mpi.h>
 // ours
 #include "common.h"
 #include "vecmath.h"
+
+namespace rafi {
+template<typename RayT>
+struct HostContext;
+} // namespace rafi
 
 namespace streami {
 
@@ -71,6 +80,8 @@ MacroCell makeMacroCell(const box3f worldBounds,
 // ========================================================
 
 struct VecField {
+  typedef std::shared_ptr<VecField> SP;
+
   struct DD {
     box3f worldBounds;
     vec3i numMCs;
@@ -106,6 +117,62 @@ struct VecField {
 
   vec3i numMCs;
   MacroCell mc;
+};
+
+
+// ========================================================
+// Context
+// ========================================================
+
+struct Context {
+  Context(int argc, char **argv);
+  ~Context();
+
+  MPI_Comm newComm();
+ private:
+};
+
+
+// ========================================================
+// Tracer
+// ========================================================
+
+struct Tracer {
+  struct Params {
+    int numParticles{0};
+    int maxSteps{0};
+    float stepSize{0.f};
+    float minLength{0.f};
+    struct {
+      box3f bounds{vec3f{1e20f},vec3f{-1e20f}};
+      bool isSpherical{false};
+    } roi;
+  };
+
+  Tracer(Context &ctx, const Params &p);
+
+  void setField(const VecField::SP &field);
+
+  void setParams(const Params &p);
+
+  bool step();
+
+  void trace();
+
+ private:
+  void init();
+
+  Context &context;
+  Params params;
+  VecField::SP field;
+  VecField::DD fieldDD;
+
+  int globalN, localN;
+  Particle *dOutput{nullptr};
+
+  bool initialized{false};
+
+  rafi::HostContext<Particle> *rafi{nullptr};
 };
 
 } // streami

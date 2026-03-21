@@ -8,7 +8,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(anari 0.15.0 REQUIRED)
+find_package(umesh REQUIRED)
 
 add_executable(${PROJECT_NAME} main.cu)
 target_link_libraries(${PROJECT_NAME} PRIVATE
-    dvr_course-common anari::anari streami_library)
+    dvr_course-common anari::anari streami_library umesh::umesh)

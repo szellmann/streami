@@ -5,9 +5,10 @@
 #include <anari/anari_cpp.hpp>
 // anari-math
 #include <anari/anari_cpp/ext/linalg.h>
-
+// common
 #include <dvr_course-common.h>
-
+// umesh
+#include "umesh/UMesh.h"
 // streami:
 #include "streami.h"
 #include "field/Spherical.h"
@@ -22,6 +23,32 @@ ANARI_TYPEFOR_DEFINITION(box3_t);
 
 using namespace dvr_course;
 
+inline __host__ __device__ vec3f toSpherical(const vec3f cartesian)
+{
+  float r = length(cartesian);
+  float lat = asinf(cartesian.z/r);
+  float lon = atan2f(cartesian.y, cartesian.x);
+  return {r,lat,lon};
+}
+
+inline __host__ __device__ vec3f toCartesian(const vec3f spherical)
+{
+  const float r = spherical.x;
+  const float lat = spherical.y;
+  const float lon = spherical.z;
+
+#ifdef __CUDA_ARCH__
+  float x = r * __cosf(lat) * __cosf(lon);
+  float y = r * __cosf(lat) * __sinf(lon);
+  float z = r * __sinf(lat);
+#else
+  float x = r * cosf(lat) * cosf(lon);
+  float y = r * cosf(lat) * sinf(lon);
+  float z = r * sinf(lat);
+#endif
+  return {x,y,z};
+}
+
 struct {
   Transfunc transfunc;
   anari::SpatialField field{nullptr};
@@ -29,6 +56,7 @@ struct {
   anari::Geometry roiGeom{nullptr};
   anari::Geometry lineGeom{nullptr};
   box1f valueRange{0.f,1.f};
+  float cylRadius{1.f};
 } g_appState;
 
 // ========================================================
@@ -55,65 +83,8 @@ static void statusFunc(const void * /*userData*/,
   // Ignore INFO/DEBUG messages
 }
 
-static anari::World generateScene(anari::Device device,
-                                  const std::vector<vec3f> &values,
-                                  vec3i org, vec3i dims)
+static anari::World generateWorld(anari::Device device, anari::Volume volume)
 {
-  float minValue{1e30f};
-  float maxValue{-1e30f};
-  std::vector<float> magnitude(values.size());
-  for (size_t i=0; i<values.size(); ++i) {
-    magnitude[i] = length(values[i]);
-    minValue = fminf(minValue,magnitude[i]);
-    maxValue = fmaxf(maxValue,magnitude[i]);
-  }
-
-  g_appState.field = anari::newObject<anari::SpatialField>(device, "structuredRegular");
-
-        auto scalar = anariNewArray3D(device,
-            magnitude.data(),
-            0,
-            0,
-            ANARI_FLOAT32,
-            dims.x,
-            dims.y,
-            dims.z);
-        anari::setAndReleaseParameter(device, g_appState.field, "data", scalar);
-  //anari::setParameterArray3D(device,
-  //    g_appState.field,
-  //    "data",
-  //    ANARI_FLOAT32,
-  //    magnitude.data(),
-  //    dims.x,dims.y,dims.z);
-
-  anari::commitParameters(device, g_appState.field);
-
-  auto &volume = g_appState.volume;
-  volume = anari::newObject<anari::Volume>(device, "transferFunction1D");
-  anari::setParameter(device, volume, "value", g_appState.field);
-
-  std::vector<anari::math::float3> colors;
-  std::vector<float> opacities;
-
-  //anari::setAndReleaseParameter(device,
-  //    volume,
-  //    "color",
-  //    anari::newArray1D(device, colors.data(), colors.size()));
-  //anari::setAndReleaseParameter(device,
-  //    volume,
-  //    "opacity",
-  //    anari::newArray1D(device, opacities.data(), opacities.size()));
-  anari::math::float2 voxelRange(minValue,maxValue);
-  anariSetParameter(
-      device, volume, "valueRange", ANARI_FLOAT32_BOX1, &voxelRange);
-  float unitDistance{0.02f};
-  anariSetParameter(
-      device, volume, "unitDistance", ANARI_FLOAT32, &unitDistance);
-
-  g_appState.valueRange = {voxelRange.x,voxelRange.y};
-
-  anari::commitParameters(device, volume);
-
   g_appState.roiGeom = anari::newObject<anari::Geometry>(device, "cylinder");
   anari::commitParameters(device, g_appState.roiGeom);
 
@@ -161,42 +132,246 @@ static anari::World generateScene(anari::Device device,
   return world;
 }
 
-static void drawROI(anari::Device device, vec3f p0, vec3f p1) {
-  vec3f lower = min(p0,p1);
-  vec3f upper = max(p0,p1);
-  anari::math::float3 vertices[8] = {
-    {lower.x,lower.y,lower.z},
-    {upper.x,lower.y,lower.z},
-    {upper.x,upper.y,lower.z},
-    {lower.x,upper.y,lower.z},
-    {lower.x,lower.y,upper.z},
-    {upper.x,lower.y,upper.z},
-    {upper.x,upper.y,upper.z},
-    {lower.x,upper.y,upper.z},
-  };
+static anari::World generateScene(anari::Device device,
+                                  const std::vector<vec3f> &vertices,
+                                  const std::vector<int> &indices,
+                                  const std::vector<int> &cellIndices,
+                                  const std::vector<vec3f> &uvw)
+{
+  float minValue{1e30f};
+  float maxValue{-1e30f};
+  std::vector<float> magnitude(uvw.size());
+  for (size_t i=0; i<uvw.size(); ++i) {
+    magnitude[i] = length(uvw[i]);
+    minValue = fminf(minValue,magnitude[i]);
+    maxValue = fmaxf(maxValue,magnitude[i]);
+  }
 
-  anari::math::uint2 indices[12] = {
-    {0,1}, {1,2}, {2,3}, {3,0},
-    {4,5}, {5,6}, {6,7}, {7,4},
-    {0,4},
-    {1,5},
-    {2,6},
-    {3,7},
+  enum {
+    VTK_TET_ = 10,
+    VTK_HEX_ = 12,
+    VTK_WEDGE_ = 13,
+    VTK_PYR_ = 14,
+    VTK_BEZIER_HEX_ = 79,
   };
+  std::vector<uint8_t> cellType(cellIndices.size());
+  for (size_t i=0; i<cellType.size(); ++i) {
+    cellType[i] = VTK_WEDGE_;
+  }
+
+  g_appState.field = anari::newObject<anari::SpatialField>(device, "unstructured");
 
   anari::setParameterArray1D(device,
-      g_appState.roiGeom,
+      g_appState.field,
       "vertex.position",
       ANARI_FLOAT32_VEC3,
-      vertices,
-      sizeof(vertices)/sizeof(vertices[0]));
+      vertices.data(),
+      vertices.size());
+
   anari::setParameterArray1D(device,
-      g_appState.roiGeom,
-      "primitive.index",
-      ANARI_UINT32_VEC2,
-      indices,
-      sizeof(indices)/sizeof(indices[0]));
-  anari::setParameter(device, g_appState.roiGeom, "radius", 1.f);
+      g_appState.field,
+      "cell.type",
+      ANARI_UINT8,
+      cellType.data(),
+      cellType.size());
+
+  anari::setParameterArray1D(device,
+      g_appState.field,
+      "index",
+      ANARI_UINT32,
+      indices.data(),
+      indices.size());
+
+  anari::setParameterArray1D(device,
+      g_appState.field,
+      "cell.index",
+      ANARI_UINT32,
+      cellIndices.data(),
+      cellIndices.size());
+
+  anari::setParameterArray1D(device,
+      g_appState.field,
+      "cell.data",
+      ANARI_FLOAT32,
+      magnitude.data(),
+      magnitude.size());
+
+  anari::commitParameters(device, g_appState.field);
+
+  auto &volume = g_appState.volume;
+  volume = anari::newObject<anari::Volume>(device, "transferFunction1D");
+  anari::setParameter(device, volume, "value", g_appState.field);
+
+  std::vector<anari::math::float3> colors;
+  std::vector<float> opacities;
+
+  anari::math::float2 voxelRange(minValue,maxValue);
+  anariSetParameter(
+      device, volume, "valueRange", ANARI_FLOAT32_BOX1, &voxelRange);
+  float unitDistance{100.f};
+  anariSetParameter(
+      device, volume, "unitDistance", ANARI_FLOAT32, &unitDistance);
+
+  g_appState.valueRange = {voxelRange.x,voxelRange.y};
+
+  anari::commitParameters(device, volume);
+
+  return generateWorld(device, volume);
+}
+
+static anari::World generateScene(anari::Device device,
+                                  const std::vector<vec3f> &values,
+                                  vec3i org, vec3i dims)
+{
+  float minValue{1e30f};
+  float maxValue{-1e30f};
+  std::vector<float> magnitude(values.size());
+  for (size_t i=0; i<values.size(); ++i) {
+    magnitude[i] = length(values[i]);
+    minValue = fminf(minValue,magnitude[i]);
+    maxValue = fmaxf(maxValue,magnitude[i]);
+  }
+
+  g_appState.field = anari::newObject<anari::SpatialField>(device, "structuredRegular");
+
+  auto scalar = anariNewArray3D(device,
+      magnitude.data(),
+      0,
+      0,
+      ANARI_FLOAT32,
+      dims.x,
+      dims.y,
+      dims.z);
+  anari::setAndReleaseParameter(device, g_appState.field, "data", scalar);
+
+  anari::commitParameters(device, g_appState.field);
+
+  auto &volume = g_appState.volume;
+  volume = anari::newObject<anari::Volume>(device, "transferFunction1D");
+  anari::setParameter(device, volume, "value", g_appState.field);
+
+  std::vector<anari::math::float3> colors;
+  std::vector<float> opacities;
+
+  anari::math::float2 voxelRange(minValue,maxValue);
+  anariSetParameter(
+      device, volume, "valueRange", ANARI_FLOAT32_BOX1, &voxelRange);
+  float unitDistance{0.02f};
+  anariSetParameter(
+      device, volume, "unitDistance", ANARI_FLOAT32, &unitDistance);
+
+  g_appState.valueRange = {voxelRange.x,voxelRange.y};
+
+  anari::commitParameters(device, volume);
+
+  return generateWorld(device, volume);
+}
+
+static void drawROI(anari::Device device, vec3f p0, vec3f p1, bool spherical) {
+  vec3f lower = min(p0,p1);
+  vec3f upper = max(p0,p1);
+
+  if (spherical) {
+    std::vector<anari::math::float3> vertices;
+    std::vector<anari::math::uint2> indices;
+
+    auto toCartesian = [](const vec3f &v) {
+      auto vv = ::toCartesian(v);
+      return anari::math::float3{vv.x,vv.y,vv.z};
+    };
+
+    int LAT=150, LON=150;
+
+    // LAT
+    vertices.push_back(toCartesian({lower.x,lower.y,lower.z}));
+    for (int lat=1; lat<LAT; ++lat) {
+      vertices.push_back(toCartesian({lower.x,lower.y+lat*(upper-lower).y/LAT,lower.z}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+    vertices.push_back(toCartesian({lower.x,lower.y,upper.z}));
+    for (int lat=1; lat<LAT; ++lat) {
+      vertices.push_back(toCartesian({lower.x,lower.y+lat*(upper-lower).y/LAT,upper.z}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+    vertices.push_back(toCartesian({upper.x,lower.y,upper.z}));
+    for (int lat=1; lat<LAT; ++lat) {
+      vertices.push_back(toCartesian({upper.x,lower.y+lat*(upper-lower).y/LAT,upper.z}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+    vertices.push_back(toCartesian({upper.x,lower.y,lower.z}));
+    for (int lat=1; lat<LAT; ++lat) {
+      vertices.push_back(toCartesian({upper.x,lower.y+lat*(upper-lower).y/LAT,lower.z}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+    // LON
+    vertices.push_back(toCartesian({lower.x,lower.y,lower.z}));
+    for (int lon=1; lon<LON; ++lon) {
+      vertices.push_back(toCartesian({lower.x,lower.y,lower.z+lon*(upper-lower).z/LON}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+    vertices.push_back(toCartesian({lower.x,upper.y,lower.z}));
+    for (int lon=1; lon<LON; ++lon) {
+      vertices.push_back(toCartesian({lower.x,upper.y,lower.z+lon*(upper-lower).z/LON}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+    vertices.push_back(toCartesian({upper.x,upper.y,lower.z}));
+    for (int lon=1; lon<LON; ++lon) {
+      vertices.push_back(toCartesian({upper.x,upper.y,lower.z+lon*(upper-lower).z/LON}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+    vertices.push_back(toCartesian({upper.x,lower.y,lower.z}));
+    for (int lon=1; lon<LON; ++lon) {
+      vertices.push_back(toCartesian({upper.x,lower.y,lower.z+lon*(upper-lower).z/LON}));
+      indices.push_back({vertices.size()-2,vertices.size()-1});
+    }
+
+    anari::setParameterArray1D(device,
+        g_appState.roiGeom,
+        "vertex.position",
+        ANARI_FLOAT32_VEC3,
+        vertices.data(),
+        vertices.size());
+    anari::setParameterArray1D(device,
+        g_appState.roiGeom,
+        "primitive.index",
+        ANARI_UINT32_VEC2,
+        indices.data(),
+        indices.size());
+  } else {
+    anari::math::float3 vertices[8] = {
+      {lower.x,lower.y,lower.z},
+      {upper.x,lower.y,lower.z},
+      {upper.x,upper.y,lower.z},
+      {lower.x,upper.y,lower.z},
+      {lower.x,lower.y,upper.z},
+      {upper.x,lower.y,upper.z},
+      {upper.x,upper.y,upper.z},
+      {lower.x,upper.y,upper.z},
+    };
+
+    anari::math::uint2 indices[12] = {
+      {0,1}, {1,2}, {2,3}, {3,0},
+      {4,5}, {5,6}, {6,7}, {7,4},
+      {0,4},
+      {1,5},
+      {2,6},
+      {3,7},
+    };
+
+    anari::setParameterArray1D(device,
+        g_appState.roiGeom,
+        "vertex.position",
+        ANARI_FLOAT32_VEC3,
+        vertices,
+        sizeof(vertices)/sizeof(vertices[0]));
+    anari::setParameterArray1D(device,
+        g_appState.roiGeom,
+        "primitive.index",
+        ANARI_UINT32_VEC2,
+        indices,
+        sizeof(indices)/sizeof(indices[0]));
+  }
+  anari::setParameter(device, g_appState.roiGeom, "radius", g_appState.cylRadius);
   anari::commitParameters(device, g_appState.roiGeom);
 }
 
@@ -230,7 +405,7 @@ static void drawStreamlines(anari::Device device,
         ANARI_UINT32_VEC2,
         indices.data(),
         indices.size());
-    anari::setParameter(device, g_appState.lineGeom, "radius", 1.f);
+    anari::setParameter(device, g_appState.lineGeom, "radius", g_appState.cylRadius);
   }
 
   anari::commitParameters(device, g_appState.lineGeom);
@@ -263,6 +438,14 @@ int main(int argc, char *argv[]) {
 
   streami::Context ctx(argc, argv);
 
+  streami::Tracer::Params parms;
+  parms.numParticles=5;
+  parms.maxSteps=1000;
+  parms.stepSize=0.5f;
+  parms.minLength=1e-3f;
+
+  streami::Tracer tracer(ctx,parms);
+
   Pipeline pl(argc, argv, "ex00_hello_dvr_course");
 
   std::string fileName;
@@ -285,48 +468,135 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (dims.x*dims.y*dims.z<=0) {
-    std::cerr << "-dims invalid\n";
-    return 0;
-  }
+  auto library = anari::loadLibrary("environment", statusFunc);
+  auto device = anari::newDevice(library, "default");
 
-  std::ifstream in(fileName);
-  std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
-  in.read((char *)values.data(),sizeof(values[0])*values.size());
-
-  box3f worldBounds{
-    {(float)org.x,(float)org.y,(float)org.z},
-    {(float)dims.x,(float)dims.y,(float)dims.z}
-  };
+  anari::World world{nullptr};
+  
+  streami::VecField::SP field{nullptr};
 
   streami::RankInfo ri{0,1};//rafi->mpi.rank,rafi->mpi.size};
 
-  vec3i gridSize(1);
-  float halo(20.f);
-  streami::MacroCell localMC = streami::makeMacroCell(worldBounds,gridSize,ri,halo);
+  box3f worldBounds, sphericalBounds;
+  if (endsWith(fileName,".umesh")) {
+    umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(fileName);
 
-  auto field = std::make_shared<streami::StructuredField>(values.data(),dims,org);
-  field->numMCs = gridSize;
-  field->mc = localMC;
+    auto umeshBounds = inMesh->getBounds();
+    worldBounds = box3f{
+      {umeshBounds.lower.x,umeshBounds.lower.y,umeshBounds.lower.z},
+      {umeshBounds.upper.x,umeshBounds.upper.y,umeshBounds.upper.z}
+    };
 
-  streami::Tracer::Params parms;
-  parms.numParticles=5;
-  parms.maxSteps=1000;
-  parms.stepSize=0.5f;
-  parms.minLength=1e-3f;
+    vec3i gridSize(1);
+    streami::MacroCell localMC
+        = makeMacroCell(worldBounds,gridSize,ri,worldBounds.size().x/10.f);
 
-  streami::Tracer tracer(ctx,parms);
+    std::vector<vec3f> vertices;
+    std::vector<int> indices;
+    std::vector<int> cellIndices;
+    std::vector<vec3f> uvw;
 
-  tracer.setField(field);
+    std::vector<int> old2new(inMesh->vertices.size(),-1);
+
+    sphericalBounds = box3f(vec3f(1e30f),vec3f(-1e30f));
+
+    for (size_t i=0; i<inMesh->wedges.size(); ++i) {
+      bool ours = false;
+      for (int j=0; j<6; ++j) {
+        int vertID = inMesh->wedges[i][j];
+        auto vv = inMesh->vertices[vertID];
+        vec3f v(vv.x,vv.y,vv.z);
+        if (localMC.domain.contains(v)) {
+          ours = true;
+          break;
+        }
+      }
+
+      if (!ours) continue;
+
+      for (int j=0; j<6; ++j) {
+        int vertID = inMesh->wedges[i][j];
+        auto vv = inMesh->vertices[vertID];
+        vec3f v(vv.x,vv.y,vv.z);
+        if (old2new[vertID] < 0) {
+          old2new[vertID] = (int)vertices.size();
+          vertices.push_back(v);
+          sphericalBounds.extend(toSpherical(v));
+        }
+      }
+    }
+
+    // TODO: for now only wedges...
+
+    for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i) {
+      int I[6];
+      for (int j=0; j<6; ++j) {
+        I[j] = old2new[inMesh->wedges[i][j]];
+      }
+      if (I[0]<0 || I[1]<0 || I[2]<0 || I[3]<0 || I[4]<0 || I[5]<0) // not ours!
+        continue;
+
+      indices.push_back(I[0]);
+      indices.push_back(I[1]);
+      indices.push_back(I[2]);
+      indices.push_back(I[3]);
+      indices.push_back(I[4]);
+      indices.push_back(I[5]);
+      cellIndices.push_back(cellIndex);
+      cellIndex += 6;
+      // u/v/w direction vectors stored in
+      // the first three vertices:
+      float u = inMesh->perVertex->values[inMesh->wedges[i][0]];
+      float v = inMesh->perVertex->values[inMesh->wedges[i][1]];
+      float w = inMesh->perVertex->values[inMesh->wedges[i][2]];
+      uvw.push_back({u,v,w});
+    }
+
+    std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
+      << " out of " << inMesh->vertices.size() << " vertices\n";
+
+    std::cout << "rank #" << ri.rankID << " gets " << uvw.size()
+      << " out of " << inMesh->wedges.size() << " wedge cells\n";
+
+    world = generateScene(device,vertices,indices,cellIndices,uvw);
+
+    field = std::make_shared<streami::UMeshField>(vertices.data(),
+                                                  indices.data(),
+                                                  cellIndices.data(),
+                                                  uvw.data(),
+                                                  vertices.size(),
+                                                  indices.size(),
+                                                  cellIndices.size());
+    tracer.setField((const streami::UMeshField::SP &)field);
+  } else {
+    if (dims.x*dims.y*dims.z<=0) {
+      std::cerr << "-dims invalid\n";
+      return 0;
+    }
+
+    std::ifstream in(fileName);
+    std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
+    in.read((char *)values.data(),sizeof(values[0])*values.size());
+
+    worldBounds = box3f{
+      {(float)org.x,(float)org.y,(float)org.z},
+      {(float)dims.x,(float)dims.y,(float)dims.z}
+    };
+
+    world = generateScene(device,values,org,dims);
+    vec3i gridSize(1);
+    float halo(20.f);
+    streami::MacroCell localMC = streami::makeMacroCell(worldBounds,gridSize,ri,halo);
+
+    field = std::make_shared<streami::StructuredField>(values.data(),dims,org);
+    field->numMCs = gridSize;
+    field->mc = localMC;
+    tracer.setField((const streami::StructuredField::SP &)field);
+  }
 
   int imgWidth=512, imgHeight=512;
   Frame fb(imgWidth, imgHeight);
   pl.setFrame(&fb);
-
-  auto library = anari::loadLibrary("environment", statusFunc);
-  auto device = anari::newDevice(library, "default");
-
-  auto world = generateScene(device,values,org,dims);
 
   if (!pl.transfuncValid()) {
     auto &tf = g_appState.transfunc;
@@ -373,11 +643,17 @@ int main(int argc, char *argv[]) {
 
   //box3f worldBounds = *(box3f*)&bounds;
 
-  vec3f lower=worldBounds.lower, prevLower=worldBounds.lower;
-  pl.uiParam("roi.lo", &lower, worldBounds.lower, worldBounds.upper);
+  bool sphericalROI=false, prevSphericalROI=false;
+  pl.uiParam("roi.spherical", &sphericalROI);
 
-  vec3f size=worldBounds.size(), prevSize=worldBounds.size();
-  pl.uiParam("roi.size", &size, vec3f(1.f), worldBounds.size());
+  box3f roiBounds=worldBounds;
+  if (sphericalROI) {
+    roiBounds=sphericalBounds;
+  }
+  vec3f lower=roiBounds.lower, prevLower=roiBounds.lower;
+  vec3f size=roiBounds.size(), prevSize=roiBounds.size();
+  pl.uiParam("roi.lo", &lower, roiBounds.lower, roiBounds.upper);
+  pl.uiParam("roi.size", &size, vec3f(1.f), roiBounds.size());
 
   int numParticles=parms.numParticles, prevNumParticles=parms.numParticles;
   pl.uiParam("# particles", &numParticles, 1, 1<<16);
@@ -397,7 +673,7 @@ int main(int argc, char *argv[]) {
     cam.getScreen(screen.lower_left,screen.horizontal,screen.vertical);
 
     if (lower != prevLower || size != prevSize || numParticles != prevNumParticles ||
-        stepSize != prevStepSize || minLength != prevMinLength)
+        stepSize != prevStepSize || minLength != prevMinLength || sphericalROI != prevSphericalROI)
     {
       parms.roi.bounds.lower = lower;
       parms.roi.bounds.upper = lower+size;
@@ -411,11 +687,12 @@ int main(int argc, char *argv[]) {
       prevNumParticles = numParticles;
       prevStepSize     = stepSize;
       prevMinLength    = minLength;
+      prevSphericalROI = sphericalROI;
 
       auto p0 = parms.roi.bounds.lower;
       auto p1 = parms.roi.bounds.upper;
 
-      drawROI(device,p0,p1);
+      drawROI(device,p0,p1,sphericalROI);
       drawStreamlines(device,tracer.getLines());
 
       std::cout << "-roi " << p0.x << ' ' << p0.y << ' ' << p0.z << ' ' << p1.x << ' ' << p1.y << ' ' << p1.z << '\n';

@@ -10,6 +10,9 @@
 namespace streami {
 
 struct UMeshField : public VecField {
+
+  typedef std::shared_ptr<UMeshField> SP;
+
 #if 1
     using bvh_t  = cuBQL::BinaryBVH<float,3>;
 #else

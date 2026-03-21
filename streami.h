@@ -17,6 +17,9 @@ struct HostContext;
 
 namespace streami {
 
+struct StructuredField;
+struct UMeshField;
+
 // import vector math types:
 using namespace vecmath;
 
@@ -158,7 +161,8 @@ struct Tracer {
 
   Tracer(Context &ctx, const Params &p);
 
-  void setField(const VecField::SP &field);
+  void setField(const std::shared_ptr<StructuredField> &field);
+  void setField(const std::shared_ptr<UMeshField> &field);
 
   void setParams(const Params &p);
 
@@ -169,12 +173,14 @@ struct Tracer {
   std::vector<Line> getLines();
 
  private:
+  enum FieldType { Structured, UMesh, Undefined, };
   void init();
   void appendOutput();
 
   Context &context;
   Params params;
-  VecField::SP field;
+  VecField::SP field{nullptr};
+  FieldType fieldType{Undefined};
 
   std::vector<Line> hLines;
 

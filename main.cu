@@ -235,6 +235,22 @@ void call_generateRandomSeeds_StructuredField(const VecField::SP field,
       fieldDD,rafi,output,numParticles,roi,g_appState.roi.isSpherical);
 }
 
+void call_generateRandomSeeds_UMeshField(const VecField::SP field,
+                                         rafi::DeviceInterface<Particle> rafi,
+                                         Particle *output, // to dump to file
+                                         int numParticles,
+                                         box3f *roi=nullptr,
+                                         bool roiIsSpherical=false)
+{
+  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
+
+  const UMeshField::SP &sfield = (const UMeshField::SP &)field;
+  const UMeshField::DD &fieldDD = sfield->getDD(ri);
+
+  CONFIG_KERNEL(generateRandomSeeds,numParticles)(
+      fieldDD,rafi,output,numParticles,roi,g_appState.roi.isSpherical);
+}
+
 template<typename Field>
 __global__ void update(const Field field,
                        rafi::DeviceInterface<Particle> rafi,
@@ -308,6 +324,23 @@ void call_update_StructuredField(const VecField::SP field,
 
   const StructuredField::SP &sfield = (const StructuredField::SP &)field;
   const StructuredField::DD &fieldDD = sfield->getDD(ri);
+
+  CONFIG_KERNEL(update,numParticles)(
+      fieldDD,rafi,output,numParticles,stepSize,minLength,0);
+}
+
+void call_update_UMeshField(const VecField::SP field,
+                            rafi::DeviceInterface<Particle> rafi,
+                            Particle *output, // to dump to file
+                            int numParticles,
+                            float stepSize,
+                            float minLength,
+                            box1f *magnitudeRange=0/*for diagnostic*/)
+{
+  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
+
+  const UMeshField::SP &sfield = (const UMeshField::SP &)field;
+  const UMeshField::DD &fieldDD = sfield->getDD(ri);
 
   CONFIG_KERNEL(update,numParticles)(
       fieldDD,rafi,output,numParticles,stepSize,minLength,0);

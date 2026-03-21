@@ -267,11 +267,18 @@ static anari::World generateScene(anari::Device device,
   return generateWorld(device, volume);
 }
 
-static void drawROI(anari::Device device, vec3f p0, vec3f p1, bool spherical) {
+static void drawROI(
+    anari::Device device, vec3f p0, vec3f p1, bool spherical, bool visible)
+{
   vec3f lower = min(p0,p1);
   vec3f upper = max(p0,p1);
 
-  if (spherical) {
+  if (!visible) {
+    anari::unsetParameter(device, g_appState.roiGeom, "vertex.position");
+    anari::unsetParameter(device, g_appState.roiGeom, "primitive.index");
+    anari::unsetParameter(device, g_appState.roiGeom, "vertex.color");
+    anari::setParameter(device, g_appState.roiGeom, "radius", 0.f);
+  } else if (spherical) {
     std::vector<anari::math::float3> vertices;
     std::vector<anari::math::uint2> indices;
 
@@ -282,46 +289,49 @@ static void drawROI(anari::Device device, vec3f p0, vec3f p1, bool spherical) {
 
     int LAT=150, LON=150;
 
+    float latInc = (upper.y-lower.y)/LAT;
+    float lonInc = (upper.z-lower.z)/LON;
+
     // LAT
     vertices.push_back(toCartesian({lower.x,lower.y,lower.z}));
-    for (int lat=1; lat<LAT; ++lat) {
-      vertices.push_back(toCartesian({lower.x,lower.y+lat*(upper-lower).y/LAT,lower.z}));
+    for (int lat=1; lat<=LAT; ++lat) {
+      vertices.push_back(toCartesian({lower.x,lower.y+lat*latInc,lower.z}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
     vertices.push_back(toCartesian({lower.x,lower.y,upper.z}));
-    for (int lat=1; lat<LAT; ++lat) {
-      vertices.push_back(toCartesian({lower.x,lower.y+lat*(upper-lower).y/LAT,upper.z}));
+    for (int lat=1; lat<=LAT; ++lat) {
+      vertices.push_back(toCartesian({lower.x,lower.y+lat*latInc,upper.z}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
     vertices.push_back(toCartesian({upper.x,lower.y,upper.z}));
-    for (int lat=1; lat<LAT; ++lat) {
-      vertices.push_back(toCartesian({upper.x,lower.y+lat*(upper-lower).y/LAT,upper.z}));
+    for (int lat=1; lat<=LAT; ++lat) {
+      vertices.push_back(toCartesian({upper.x,lower.y+lat*latInc,upper.z}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
     vertices.push_back(toCartesian({upper.x,lower.y,lower.z}));
-    for (int lat=1; lat<LAT; ++lat) {
-      vertices.push_back(toCartesian({upper.x,lower.y+lat*(upper-lower).y/LAT,lower.z}));
+    for (int lat=1; lat<=LAT; ++lat) {
+      vertices.push_back(toCartesian({upper.x,lower.y+lat*latInc,lower.z}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
     // LON
     vertices.push_back(toCartesian({lower.x,lower.y,lower.z}));
-    for (int lon=1; lon<LON; ++lon) {
-      vertices.push_back(toCartesian({lower.x,lower.y,lower.z+lon*(upper-lower).z/LON}));
+    for (int lon=1; lon<=LON; ++lon) {
+      vertices.push_back(toCartesian({lower.x,lower.y,lower.z+lon*lonInc}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
     vertices.push_back(toCartesian({lower.x,upper.y,lower.z}));
-    for (int lon=1; lon<LON; ++lon) {
-      vertices.push_back(toCartesian({lower.x,upper.y,lower.z+lon*(upper-lower).z/LON}));
+    for (int lon=1; lon<=LON; ++lon) {
+      vertices.push_back(toCartesian({lower.x,upper.y,lower.z+lon*lonInc}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
     vertices.push_back(toCartesian({upper.x,upper.y,lower.z}));
-    for (int lon=1; lon<LON; ++lon) {
-      vertices.push_back(toCartesian({upper.x,upper.y,lower.z+lon*(upper-lower).z/LON}));
+    for (int lon=1; lon<=LON; ++lon) {
+      vertices.push_back(toCartesian({upper.x,upper.y,lower.z+lon*lonInc}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
     vertices.push_back(toCartesian({upper.x,lower.y,lower.z}));
-    for (int lon=1; lon<LON; ++lon) {
-      vertices.push_back(toCartesian({upper.x,lower.y,lower.z+lon*(upper-lower).z/LON}));
+    for (int lon=1; lon<=LON; ++lon) {
+      vertices.push_back(toCartesian({upper.x,lower.y,lower.z+lon*lonInc}));
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
 
@@ -337,6 +347,7 @@ static void drawROI(anari::Device device, vec3f p0, vec3f p1, bool spherical) {
         ANARI_UINT32_VEC2,
         indices.data(),
         indices.size());
+    anari::setParameter(device, g_appState.roiGeom, "radius", g_appState.cylRadius);
   } else {
     anari::math::float3 vertices[8] = {
       {lower.x,lower.y,lower.z},
@@ -370,8 +381,8 @@ static void drawROI(anari::Device device, vec3f p0, vec3f p1, bool spherical) {
         ANARI_UINT32_VEC2,
         indices,
         sizeof(indices)/sizeof(indices[0]));
+    anari::setParameter(device, g_appState.roiGeom, "radius", g_appState.cylRadius);
   }
-  anari::setParameter(device, g_appState.roiGeom, "radius", g_appState.cylRadius);
   anari::commitParameters(device, g_appState.roiGeom);
 }
 
@@ -380,14 +391,19 @@ static void drawStreamlines(anari::Device device,
 {
   std::vector<anari::math::float3> vertices;
   std::vector<anari::math::uint2> indices;
+  std::vector<anari::math::float3> colors;
 
   for (size_t i=0; i<lines.size(); ++i) {
     if (lines[i].empty()) continue;
     vec3f v0 = lines[i][0].p.P;
+    vec3f c0 = lines[i][0].color;
     vertices.push_back({v0.x,v0.y,v0.z});
+    colors.push_back({c0.x,c0.y,c0.z});
     for (size_t j=1; j<lines[i].size(); ++j) {
       vec3f v = lines[i][j].p.P;
+      vec3f c = lines[i][j].color;
       vertices.push_back({v.x,v.y,v.z});
+      colors.push_back({c.x,c.y,c.z});
       indices.push_back({vertices.size()-2,vertices.size()-1});
     }
   }
@@ -405,6 +421,12 @@ static void drawStreamlines(anari::Device device,
         ANARI_UINT32_VEC2,
         indices.data(),
         indices.size());
+    anari::setParameterArray1D(device,
+        g_appState.lineGeom,
+        "vertex.color",
+        ANARI_FLOAT32_VEC3,
+        colors.data(),
+        colors.size());
     anari::setParameter(device, g_appState.lineGeom, "radius", g_appState.cylRadius);
   }
 
@@ -616,6 +638,9 @@ int main(int argc, char *argv[]) {
   auto renderer = anari::newObject<anari::Renderer>(device, "default");
   const anari::math::float4 backgroundColor = {0.1f, 0.1f, 0.1f, 1.f};
   anari::setParameter(device, renderer, "background", backgroundColor);
+  const anari::math::float3 ambientColor = {1.f, 1.f, 1.f};
+  anari::setParameter(device, renderer, "ambientColor", ambientColor);
+  anari::setParameter(device, renderer, "ambientRadiance", 0.2f);
   anari::setParameter(device, renderer, "pixelSamples", 1);
   anari::commitParameters(device, renderer);
 
@@ -642,6 +667,9 @@ int main(int argc, char *argv[]) {
   pl.setCamera(&cam);
 
   //box3f worldBounds = *(box3f*)&bounds;
+
+  bool roiVisible=true, prevRoiVisible=false;
+  pl.uiParam("roi.visible", &roiVisible);
 
   bool sphericalROI=false, prevSphericalROI=false;
   pl.uiParam("roi.spherical", &sphericalROI);
@@ -673,7 +701,8 @@ int main(int argc, char *argv[]) {
     cam.getScreen(screen.lower_left,screen.horizontal,screen.vertical);
 
     if (lower != prevLower || size != prevSize || numParticles != prevNumParticles ||
-        stepSize != prevStepSize || minLength != prevMinLength || sphericalROI != prevSphericalROI)
+        stepSize != prevStepSize || minLength != prevMinLength ||
+        sphericalROI != prevSphericalROI || roiVisible != prevRoiVisible)
     {
       parms.roi.bounds.lower = lower;
       parms.roi.bounds.upper = lower+size;
@@ -688,11 +717,13 @@ int main(int argc, char *argv[]) {
       prevStepSize     = stepSize;
       prevMinLength    = minLength;
       prevSphericalROI = sphericalROI;
+      prevRoiVisible   = roiVisible;
 
       auto p0 = parms.roi.bounds.lower;
       auto p1 = parms.roi.bounds.upper;
 
-      drawROI(device,p0,p1,sphericalROI);
+      drawROI(device,p0,p1,sphericalROI,roiVisible);
+
       drawStreamlines(device,tracer.getLines());
 
       std::cout << "-roi " << p0.x << ' ' << p0.y << ' ' << p0.z << ' ' << p1.x << ' ' << p1.y << ' ' << p1.z << '\n';

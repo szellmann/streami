@@ -175,7 +175,7 @@ struct Tracer {
  private:
   enum FieldType { Structured, UMesh, Undefined, };
   void init();
-  void appendOutput();
+  void appendOutput(const std::vector<vec3f> &vertexColors);
 
   Context &context;
   Params params;

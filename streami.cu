@@ -1,4 +1,5 @@
-
+// std
+#include <atomic>
 // rafi
 #include "rafi/implementation.h"
 // ours
@@ -38,6 +39,10 @@ std::vector<vec3f> randomColorsPerID(size_t length)
 }
 
 
+std::atomic<TimeStamp> g_timeStamp{0ull};
+TimeStamp newTimeStamp() {
+  return ++g_timeStamp;
+}
 
 // ========================================================
 // Context
@@ -99,6 +104,7 @@ Tracer::Tracer(Context &ctx, const Tracer::Params &p)
   : context(ctx), params(p)
 {
   rafi = rafi::createContext<Particle>(ctx.newComm(), 0);
+  lastInitRequest = newTimeStamp();
 }
 
 
@@ -106,25 +112,26 @@ void Tracer::setField(const StructuredField::SP &f)
 {
   field = f;
   fieldType = Structured;
-  initialized = false;
+  lastInitRequest = newTimeStamp();
 }
 
 void Tracer::setField(const UMeshField::SP &f)
 {
   field = f;
   fieldType = UMesh;
-  initialized = false;
+  lastInitRequest = newTimeStamp();
 }
 
 void Tracer::setParams(const Params &p)
 {
   params = p;
-  initialized = false;
+  lastInitRequest = newTimeStamp();
 }
 
 bool Tracer::step()
 {
-  if (!initialized) init(); // TODO: with timestamp logic
+  if (lastInitRequest >= lastInitCall)
+    init();
 
   if (fieldType == Structured) {
     call_update_StructuredField(
@@ -157,13 +164,16 @@ void Tracer::trace()
 
 std::vector<Tracer::Line> Tracer::getLines()
 {
-  if (!initialized) init(); // TODO: with timestamp logic
+  if (lastInitRequest >= lastInitCall)
+    init();
 
   return hLines;
 }
 
 void Tracer::init()
 {
+  lastInitCall = newTimeStamp();
+
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
   hLines.clear();
@@ -200,8 +210,6 @@ void Tracer::init()
   }
 
   rafi->forwardRays();
-
-  initialized = true;
 }
 
 void Tracer::appendOutput(const std::vector<vec3f> &vertexColors)

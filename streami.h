@@ -20,6 +20,9 @@ namespace streami {
 struct StructuredField;
 struct UMeshField;
 
+typedef uint64_t TimeStamp;
+TimeStamp newTimeStamp();
+
 // import vector math types:
 using namespace vecmath;
 
@@ -187,6 +190,7 @@ struct Tracer {
   int globalN, localN;
   Particle *dOutput{nullptr};
 
+  TimeStamp lastInitCall{0}, lastInitRequest{0};
   bool initialized{false};
 
   rafi::HostContext<Particle> *rafi{nullptr};

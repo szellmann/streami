@@ -72,6 +72,7 @@ static void update(const Field field,
 
   Particle p = rafi.getIncoming(particleID);
   const vec3f P0 = p.P;
+  printf("ID: %i, pos: %f,%f,%f\n",p.ID,P0.x,P0.y,P0.z);
 
   if (isnan(P0.x) || isnan(P0.y) || isnan(P0.z))
     return;

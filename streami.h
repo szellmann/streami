@@ -183,7 +183,8 @@ struct Tracer {
  private:
   enum FieldType { Structured, UMesh, Undefined, };
   void init();
-  void generateNewParticles();
+  int generateNewParticles();
+  void resizeRayQueues(size_t N);
   void insertField(const VecField::SP &field, size_t timeStep);
   void doTimeStep();
   void appendOutput(const std::vector<vec3f> &vertexColors);
@@ -195,12 +196,11 @@ struct Tracer {
 
   std::vector<Line> hLines;
 
-  int globalN, localN, activeN;
+  int globalN, localN, maxN;
   size_t currentTimeStep{0ull};
   Particle *dOutput{nullptr};
 
-  TimeStamp lastInitCall{0}, lastInitRequest{0},
-            lastGenParticlesCall{0}, lastGenParticlesRequest{0};
+  TimeStamp lastInitCall{0}, lastInitRequest{0};
 
   rafi::HostContext<Particle> *rafi{nullptr};
 };

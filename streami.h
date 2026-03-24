@@ -146,6 +146,8 @@ struct Context {
 
 struct Tracer {
   struct Params {
+    enum Mode { Streamlines, Streaklines, Undefined, };
+    Mode mode{Undefined};
     int numParticles{0};
     int maxSteps{0};
     float stepSize{0.f};
@@ -164,8 +166,11 @@ struct Tracer {
 
   Tracer(Context &ctx, const Params &p);
 
-  void setField(const std::shared_ptr<StructuredField> &field);
-  void setField(const std::shared_ptr<UMeshField> &field);
+  //=======================================================
+  // Set field for time step
+  //=======================================================
+  void setField(const std::shared_ptr<StructuredField> &field, size_t timeStep=0);
+  void setField(const std::shared_ptr<UMeshField> &field, size_t timeStep=0);
 
   void setParams(const Params &p);
 
@@ -178,20 +183,24 @@ struct Tracer {
  private:
   enum FieldType { Structured, UMesh, Undefined, };
   void init();
+  void generateNewParticles();
+  void insertField(const VecField::SP &field, size_t timeStep);
+  void doTimeStep();
   void appendOutput(const std::vector<vec3f> &vertexColors);
 
   Context &context;
   Params params;
-  VecField::SP field{nullptr};
+  std::vector<VecField::SP> fields;
   FieldType fieldType{Undefined};
 
   std::vector<Line> hLines;
 
-  int globalN, localN;
+  int globalN, localN, activeN;
+  size_t currentTimeStep{0ull};
   Particle *dOutput{nullptr};
 
-  TimeStamp lastInitCall{0}, lastInitRequest{0};
-  bool initialized{false};
+  TimeStamp lastInitCall{0}, lastInitRequest{0},
+            lastGenParticlesCall{0}, lastGenParticlesRequest{0};
 
   rafi::HostContext<Particle> *rafi{nullptr};
 };

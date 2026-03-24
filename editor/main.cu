@@ -57,6 +57,10 @@ struct {
   anari::Geometry lineGeom{nullptr};
   box1f valueRange{0.f,1.f};
   float cylRadius{1.f};
+  struct {
+    box3f bounds{vec3f{1e20f},vec3f{-1e20f}};
+    bool isSpherical{false};
+  } roi;
 } g_appState;
 
 // ========================================================
@@ -470,7 +474,8 @@ int main(int argc, char *argv[]) {
 
   Pipeline pl(argc, argv, "ex00_hello_dvr_course");
 
-  std::string fileName;
+  std::vector<std::string> fileNames;
+  streami::Tracer::Params::Mode mode{streami::Tracer::Params::Streamlines};
   vec3i org=0.f, dims=0.f;
   for (int i=1;i<argc;i++) {
     std::string arg(argv[i]);
@@ -485,8 +490,35 @@ int main(int argc, char *argv[]) {
         org.y = std::stoi(argv[++i]);
         org.z = std::stoi(argv[++i]);
       }
+      if (arg == "-streaklines") {
+        mode = streami::Tracer::Params::Streaklines;
+      }
+      if (arg == "-roi") {
+        g_appState.roi.bounds.lower.x = atof(argv[++i]);
+        g_appState.roi.bounds.lower.y = atof(argv[++i]);
+        g_appState.roi.bounds.lower.z = atof(argv[++i]);
+        g_appState.roi.bounds.upper.x = atof(argv[++i]);
+        g_appState.roi.bounds.upper.y = atof(argv[++i]);
+        g_appState.roi.bounds.upper.z = atof(argv[++i]);
+        g_appState.roi.isSpherical = false;
+      }
+      if (arg == "-stepsize") {
+        parms.stepSize = atof(argv[++i]);
+      }
+      if (arg == "-minlength") {
+        parms.minlength = atof(argv[++i]);
+      }
+      if (arg == "-numparticles") {
+        parms.numParticles = std::stoi(argv[++i]);
+      }
+      if (arg == "-numsteps") {
+        parms.maxSteps = std::stoi(argv[++i]);
+      }
+      if (arg == "-tuberadius") {
+        g_appState.cylRadius = atof(argv[++i]);
+      }
     } else {
-      fileName = arg;
+      fileNames.push_back(arg);
     }
   }
 
@@ -500,120 +532,131 @@ int main(int argc, char *argv[]) {
   streami::RankInfo ri{0,1};//rafi->mpi.rank,rafi->mpi.size};
 
   box3f worldBounds, sphericalBounds;
-  if (endsWith(fileName,".umesh")) {
-    umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(fileName);
+  if (endsWith(fileNames[0],".umesh")) {
+    for (size_t f=0; f<fileNames.size(); ++f) {
+      std::string fileName = fileNames[f];
+      umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(fileName);
 
-    auto umeshBounds = inMesh->getBounds();
-    worldBounds = box3f{
-      {umeshBounds.lower.x,umeshBounds.lower.y,umeshBounds.lower.z},
-      {umeshBounds.upper.x,umeshBounds.upper.y,umeshBounds.upper.z}
-    };
+      auto umeshBounds = inMesh->getBounds();
+      worldBounds = box3f{
+        {umeshBounds.lower.x,umeshBounds.lower.y,umeshBounds.lower.z},
+        {umeshBounds.upper.x,umeshBounds.upper.y,umeshBounds.upper.z}
+      };
 
-    vec3i gridSize(1);
-    streami::MacroCell localMC
-        = makeMacroCell(worldBounds,gridSize,ri,worldBounds.size().x/10.f);
+      vec3i gridSize(1);
+      streami::MacroCell localMC
+          = makeMacroCell(worldBounds,gridSize,ri,worldBounds.size().x/10.f);
 
-    std::vector<vec3f> vertices;
-    std::vector<int> indices;
-    std::vector<int> cellIndices;
-    std::vector<vec3f> uvw;
+      std::vector<vec3f> vertices;
+      std::vector<int> indices;
+      std::vector<int> cellIndices;
+      std::vector<vec3f> uvw;
 
-    std::vector<int> old2new(inMesh->vertices.size(),-1);
+      std::vector<int> old2new(inMesh->vertices.size(),-1);
 
-    sphericalBounds = box3f(vec3f(1e30f),vec3f(-1e30f));
+      sphericalBounds = box3f(vec3f(1e30f),vec3f(-1e30f));
 
-    for (size_t i=0; i<inMesh->wedges.size(); ++i) {
-      bool ours = false;
-      for (int j=0; j<6; ++j) {
-        int vertID = inMesh->wedges[i][j];
-        auto vv = inMesh->vertices[vertID];
-        vec3f v(vv.x,vv.y,vv.z);
-        if (localMC.domain.contains(v)) {
-          ours = true;
-          break;
+      for (size_t i=0; i<inMesh->wedges.size(); ++i) {
+        bool ours = false;
+        for (int j=0; j<6; ++j) {
+          int vertID = inMesh->wedges[i][j];
+          auto vv = inMesh->vertices[vertID];
+          vec3f v(vv.x,vv.y,vv.z);
+          if (localMC.domain.contains(v)) {
+            ours = true;
+            break;
+          }
+        }
+
+        if (!ours) continue;
+
+        for (int j=0; j<6; ++j) {
+          int vertID = inMesh->wedges[i][j];
+          auto vv = inMesh->vertices[vertID];
+          vec3f v(vv.x,vv.y,vv.z);
+          if (old2new[vertID] < 0) {
+            old2new[vertID] = (int)vertices.size();
+            vertices.push_back(v);
+            sphericalBounds.extend(toSpherical(v));
+          }
         }
       }
 
-      if (!ours) continue;
+      // TODO: for now only wedges...
 
-      for (int j=0; j<6; ++j) {
-        int vertID = inMesh->wedges[i][j];
-        auto vv = inMesh->vertices[vertID];
-        vec3f v(vv.x,vv.y,vv.z);
-        if (old2new[vertID] < 0) {
-          old2new[vertID] = (int)vertices.size();
-          vertices.push_back(v);
-          sphericalBounds.extend(toSpherical(v));
+      for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i) {
+        int I[6];
+        for (int j=0; j<6; ++j) {
+          I[j] = old2new[inMesh->wedges[i][j]];
         }
+        if (I[0]<0 || I[1]<0 || I[2]<0 || I[3]<0 || I[4]<0 || I[5]<0) // not ours!
+          continue;
+
+        indices.push_back(I[0]);
+        indices.push_back(I[1]);
+        indices.push_back(I[2]);
+        indices.push_back(I[3]);
+        indices.push_back(I[4]);
+        indices.push_back(I[5]);
+        cellIndices.push_back(cellIndex);
+        cellIndex += 6;
+        // u/v/w direction vectors stored in
+        // the first three vertices:
+        float u = inMesh->perVertex->values[inMesh->wedges[i][0]];
+        float v = inMesh->perVertex->values[inMesh->wedges[i][1]];
+        float w = inMesh->perVertex->values[inMesh->wedges[i][2]];
+        uvw.push_back({u,v,w});
+      }
+
+      std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
+        << " out of " << inMesh->vertices.size() << " vertices\n";
+
+      std::cout << "rank #" << ri.rankID << " gets " << uvw.size()
+        << " out of " << inMesh->wedges.size() << " wedge cells\n";
+
+      field = std::make_shared<streami::UMeshField>(vertices.data(),
+                                                    indices.data(),
+                                                    cellIndices.data(),
+                                                    uvw.data(),
+                                                    vertices.size(),
+                                                    indices.size(),
+                                                    cellIndices.size());
+      tracer.setField((const streami::UMeshField::SP &)field, f);
+
+      if (f == 0) {
+        world = generateScene(device,vertices,indices,cellIndices,uvw);
       }
     }
-
-    // TODO: for now only wedges...
-
-    for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i) {
-      int I[6];
-      for (int j=0; j<6; ++j) {
-        I[j] = old2new[inMesh->wedges[i][j]];
-      }
-      if (I[0]<0 || I[1]<0 || I[2]<0 || I[3]<0 || I[4]<0 || I[5]<0) // not ours!
-        continue;
-
-      indices.push_back(I[0]);
-      indices.push_back(I[1]);
-      indices.push_back(I[2]);
-      indices.push_back(I[3]);
-      indices.push_back(I[4]);
-      indices.push_back(I[5]);
-      cellIndices.push_back(cellIndex);
-      cellIndex += 6;
-      // u/v/w direction vectors stored in
-      // the first three vertices:
-      float u = inMesh->perVertex->values[inMesh->wedges[i][0]];
-      float v = inMesh->perVertex->values[inMesh->wedges[i][1]];
-      float w = inMesh->perVertex->values[inMesh->wedges[i][2]];
-      uvw.push_back({u,v,w});
-    }
-
-    std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
-      << " out of " << inMesh->vertices.size() << " vertices\n";
-
-    std::cout << "rank #" << ri.rankID << " gets " << uvw.size()
-      << " out of " << inMesh->wedges.size() << " wedge cells\n";
-
-    world = generateScene(device,vertices,indices,cellIndices,uvw);
-
-    field = std::make_shared<streami::UMeshField>(vertices.data(),
-                                                  indices.data(),
-                                                  cellIndices.data(),
-                                                  uvw.data(),
-                                                  vertices.size(),
-                                                  indices.size(),
-                                                  cellIndices.size());
-    tracer.setField((const streami::UMeshField::SP &)field);
   } else {
     if (dims.x*dims.y*dims.z<=0) {
       std::cerr << "-dims invalid\n";
       return 0;
     }
 
-    std::ifstream in(fileName);
-    std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
-    in.read((char *)values.data(),sizeof(values[0])*values.size());
+    for (size_t f=0; f<fileNames.size(); ++f) {
+      std::string fileName = fileNames[f];
+      std::ifstream in(fileName);
+      std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
+      in.read((char *)values.data(),sizeof(values[0])*values.size());
 
-    worldBounds = box3f{
-      {(float)org.x,(float)org.y,(float)org.z},
-      {(float)dims.x,(float)dims.y,(float)dims.z}
-    };
+      worldBounds = box3f{
+        {(float)org.x,(float)org.y,(float)org.z},
+        {(float)dims.x,(float)dims.y,(float)dims.z}
+      };
 
-    world = generateScene(device,values,org,dims);
-    vec3i gridSize(1);
-    float halo(20.f);
-    streami::MacroCell localMC = streami::makeMacroCell(worldBounds,gridSize,ri,halo);
+      vec3i gridSize(1);
+      float halo(20.f);
+      streami::MacroCell localMC = streami::makeMacroCell(worldBounds,gridSize,ri,halo);
 
-    field = std::make_shared<streami::StructuredField>(values.data(),dims,org);
-    field->numMCs = gridSize;
-    field->mc = localMC;
-    tracer.setField((const streami::StructuredField::SP &)field);
+      field = std::make_shared<streami::StructuredField>(values.data(),dims,org);
+      field->numMCs = gridSize;
+      field->mc = localMC;
+      tracer.setField((const streami::StructuredField::SP &)field, f);
+
+      if (f == 0) {
+        world = generateScene(device,values,org,dims);
+      }
+    }
   }
 
   int imgWidth=512, imgHeight=512;
@@ -675,6 +718,9 @@ int main(int argc, char *argv[]) {
   pl.uiParam("roi.spherical", &sphericalROI);
 
   box3f roiBounds=worldBounds;
+  if (!g_appState.roi.bounds.empty()) {
+    roiBounds = g_appState.roi.bounds;
+  }
   if (sphericalROI) {
     roiBounds=sphericalBounds;
   }
@@ -704,6 +750,7 @@ int main(int argc, char *argv[]) {
         stepSize != prevStepSize || minLength != prevMinLength ||
         sphericalROI != prevSphericalROI || roiVisible != prevRoiVisible)
     {
+      parms.mode             = mode;
       parms.roi.bounds.lower = lower;
       parms.roi.bounds.upper = lower+size;
       parms.numParticles     = numParticles;

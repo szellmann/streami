@@ -75,16 +75,18 @@ Tracer::Tracer(Context &ctx, const Tracer::Params &p)
 }
 
 
-void Tracer::setField(const StructuredField::SP &f)
+void Tracer::setField(const StructuredField::SP &f, size_t timeStep)
 {
-  field = f;
+  insertField(f,timeStep);
+  assert(fileType == Undefined);
   fieldType = Structured;
   lastInitRequest = newTimeStamp();
 }
 
-void Tracer::setField(const UMeshField::SP &f)
+void Tracer::setField(const UMeshField::SP &f, size_t timeStep)
 {
-  field = f;
+  insertField(f,timeStep);
+  assert(fileType == Undefined);
   fieldType = UMesh;
   lastInitRequest = newTimeStamp();
 }
@@ -99,6 +101,15 @@ bool Tracer::step()
 {
   if (lastInitRequest >= lastInitCall)
     init();
+
+  if (params.mode == Params::Streaklines) {
+    doTimeStep();
+  }
+
+  if (lastGenParticlesRequest >= lastGenParticlesCall)
+    generateNewParticles();
+
+  auto field = fields[currentTimeStep];
 
   if (fieldType == Structured) {
     call_update_StructuredField(
@@ -143,15 +154,29 @@ void Tracer::init()
 
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
-  hLines.clear();
+  currentTimeStep = 0;
 
+  activeN=0;
   globalN=params.numParticles;
   localN=iDivUp(globalN,ri.commSize);
   globalN = localN*ri.commSize;
-  rafi->resizeRayQueues(globalN);
+  if (params.mode == Params::Streaklines) {
+    rafi->resizeRayQueues(globalN*fields.size());
+  } else {
+    rafi->resizeRayQueues(globalN);
+  }
 
   CUDA_SAFE_CALL(cudaFree(dOutput));
   CUDA_SAFE_CALL(cudaMalloc(&dOutput,sizeof(Particle)*globalN));
+
+  hLines.clear();
+
+  generateNewParticles();
+}
+
+void Tracer::generateNewParticles()
+{
+  lastGenParticlesCall = newTimeStamp();
 
   box3f *d_roi=nullptr;
   if (!params.roi.bounds.empty()) {
@@ -162,14 +187,40 @@ void Tracer::init()
                               cudaMemcpyHostToDevice));
   }
 
+  auto field = fields[currentTimeStep];
   call_generateRandomSeeds(
       field,rafi->getDeviceInterface(),dOutput,localN,d_roi,params.roi.isSpherical);
+  auto colors = randomColorsPerID(globalN);
+  appendOutput(colors);
 
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
 
   rafi->forwardRays();
+}
+
+void Tracer::insertField(const VecField::SP &field, size_t timeStep)
+{
+  size_t first = timeStep;
+  if (fields.size() <= timeStep) {
+    first = fields.size();
+    fields.resize(timeStep+1);
+  }
+  for (int i=first; i<=timeStep; ++i) {
+    fields[i] = field;
+  }
+}
+
+void Tracer::doTimeStep()
+{
+  currentTimeStep = (currentTimeStep + 1) % fields.size();
+
+  std::cout << currentTimeStep << '\n';
+
+  if (params.mode == Params::Streaklines) {
+    lastGenParticlesRequest = newTimeStamp();
+  }
 }
 
 void Tracer::appendOutput(const std::vector<vec3f> &vertexColors)

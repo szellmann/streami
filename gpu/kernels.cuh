@@ -48,7 +48,7 @@ static void generateRandomSeeds(RankInfo ri,
     }
   } while (true);
   rafi.emitOutgoing(p,ri.rankID); // only on ours!
-  //printf("%i -- %f,%f,%f\n",ri.rankID,P0.x,P0.y,P0.z);
+  printf("generate Random; rank: %i -- position: %f,%f,%f\n",ri.rankID,p.P.x,p.P.y,p.P.z);
   // for dumping:
   output[particleID] = p;
 }

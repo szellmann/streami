@@ -10,7 +10,7 @@ add_subdirectory(common)
 
 add_executable(${PROJECT_NAME})
 target_sources(${PROJECT_NAME} PRIVATE
-    main.cu field/UMeshField.cu field/StructuredField.cu)
+    main.cu field/UMeshField.cu field/StructuredField.cu gpu/kernels.cu)
 target_link_libraries(${PROJECT_NAME} PRIVATE
   dvr_course-common
   rafi
@@ -23,7 +23,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE STREAMI_APP=1)
 
 add_library(${PROJECT_NAME}_library)
 target_sources(${PROJECT_NAME}_library PRIVATE
-    main.cu streami.cu field/UMeshField.cu field/StructuredField.cu)
+    main.cu streami.cu field/UMeshField.cu field/StructuredField.cu gpu/kernels.cu)
 target_link_libraries(${PROJECT_NAME}_library PUBLIC
   dvr_course-common
   rafi

@@ -14,10 +14,8 @@
 #include "field/Spherical.h"
 #include "field/StructuredField.h"
 #include "field/UMeshField.h"
-
-#define CONFIG_KERNEL_512(kernel,n) kernel<<<iDivUp(n,512),512>>>
-#define CONFIG_KERNEL_1024(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
-#define CONFIG_KERNEL CONFIG_KERNEL_1024
+#include "gpu/kernels.h"
+#include "gpu/kernels.cuh" // include directly to implement custom field type 'Spherical'
 
 namespace streami {
 
@@ -174,178 +172,6 @@ std::vector<Particle> gatherAllParticles(
 }
 
 
-// ========================================================
-// Kernels
-// ========================================================
-
-template<typename Field>
-__global__ void generateRandomSeeds(const Field field,
-                                    rafi::DeviceInterface<Particle> rafi,
-                                    Particle *output, // to dump to file
-                                    int numParticles,
-                                    box3f *roi=nullptr,
-                                    bool roiIsSpherical=false)
-{
-  int particleID = threadIdx.x+blockIdx.x*blockDim.x;
-  if (particleID >= numParticles) return;
-
-  Particle p;
-  p.ID = numParticles*field.ri.rankID+particleID;
-
-  if (roi && !roiIsSpherical && !roi->overlaps(field.mc.bounds)) {
-    p.P = {NAN,NAN,NAN};
-    output[particleID] = p;
-    return;
-  }
-
-  Random rand(particleID,numParticles);
-  do {
-    p.P.x = rand()*field.mc.bounds.size().x+field.mc.bounds.lower.x;
-    p.P.y = rand()*field.mc.bounds.size().y+field.mc.bounds.lower.y;
-    p.P.z = rand()*field.mc.bounds.size().z+field.mc.bounds.lower.z;
-    if (!roi) break;
-    if (roiIsSpherical) {
-      float r = length(p.P);
-      float lat = asinf(p.P.z/r);
-      float lon = atan2f(p.P.y, p.P.x);
-      if (roi->contains({r,lat,lon})) break;
-    } else {
-      if (roi->contains(p.P)) break;
-    }
-  } while (true);
-  rafi.emitOutgoing(p,field.ri.rankID); // only on ours!
-  //printf("%i -- %f,%f,%f\n",field.ri.rankID,P0.x,P0.y,P0.z);
-  // for dumping:
-  output[particleID] = p;
-}
-
-void call_generateRandomSeeds_StructuredField(const VecField::SP field,
-                                              rafi::DeviceInterface<Particle> rafi,
-                                              Particle *output, // to dump to file
-                                              int numParticles,
-                                              box3f *roi=nullptr,
-                                              bool roiIsSpherical=false)
-{
-  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
-
-  const StructuredField::SP &sfield = (const StructuredField::SP &)field;
-  const StructuredField::DD &fieldDD = sfield->getDD(ri);
-
-  CONFIG_KERNEL(generateRandomSeeds,numParticles)(
-      fieldDD,rafi,output,numParticles,roi,g_appState.roi.isSpherical);
-}
-
-void call_generateRandomSeeds_UMeshField(const VecField::SP field,
-                                         rafi::DeviceInterface<Particle> rafi,
-                                         Particle *output, // to dump to file
-                                         int numParticles,
-                                         box3f *roi=nullptr,
-                                         bool roiIsSpherical=false)
-{
-  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
-
-  const UMeshField::SP &sfield = (const UMeshField::SP &)field;
-  const UMeshField::DD &fieldDD = sfield->getDD(ri);
-
-  CONFIG_KERNEL(generateRandomSeeds,numParticles)(
-      fieldDD,rafi,output,numParticles,roi,g_appState.roi.isSpherical);
-}
-
-template<typename Field>
-__global__ void update(const Field field,
-                       rafi::DeviceInterface<Particle> rafi,
-                       Particle *output, // to dump to file
-                       int numParticles,
-                       float stepSize,
-                       float minLength,
-                       box1f *magnitudeRange=0/*for diagnostic*/)
-{
-  int particleID = threadIdx.x+blockIdx.x*blockDim.x;
-  if (particleID >= numParticles) return;
-
-  Particle p = rafi.getIncoming(particleID);
-  const vec3f P0 = p.P;
-
-  if (isnan(P0.x) || isnan(P0.y) || isnan(P0.z))
-    return;
-
-  vec3f k1;
-  if (!field.sample(P0,k1))
-    return;
-  k1 *= stepSize;
-  const vec3f P1 = P0+k1*0.5f;
-
-  vec3f k2;
-  if (!field.sample(P1,k2))
-    return;
-  k2 *= stepSize;
-  const vec3f P2 = P0+k2*0.5f;
-
-  vec3f k3;
-  if (!field.sample(P2,k3))
-    return;
-  k3 *= stepSize;
-  const vec3f P3 = P0+k3;
-
-  vec3f k4;
-  if (!field.sample(P3,k4))
-    return;
-  k4 *= stepSize;
-  
-  const vec3f P = P0 + 1/6.f*(k1+2.f*k2+2.f*k3+k4);
-  //printf("%i => %f,%f,%f\n",field.ri.rankID,P.x,P.y,P.z);
-
-  if (magnitudeRange) {
-    atomicMin(&magnitudeRange->lower,length(P-P0));
-    atomicMax(&magnitudeRange->upper,length(P-P0));
-  }
-
-  if (!field.worldBounds.contains(P) || length(P-P0) < minLength) {
-    return;
-  }
-
-  p.P = P;
-  int dest = field.destinationID(P);
-  //printf("%i => %i\n",field.ri.rankID,dest);
-  rafi.emitOutgoing(p,dest);
-  // for dumping:
-  output[particleID] = p;
-}
-
-void call_update_StructuredField(const VecField::SP field,
-                                 rafi::DeviceInterface<Particle> rafi,
-                                 Particle *output, // to dump to file
-                                 int numParticles,
-                                 float stepSize,
-                                 float minLength,
-                                 box1f *magnitudeRange=0/*for diagnostic*/)
-{
-  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
-
-  const StructuredField::SP &sfield = (const StructuredField::SP &)field;
-  const StructuredField::DD &fieldDD = sfield->getDD(ri);
-
-  CONFIG_KERNEL(update,numParticles)(
-      fieldDD,rafi,output,numParticles,stepSize,minLength,0);
-}
-
-void call_update_UMeshField(const VecField::SP field,
-                            rafi::DeviceInterface<Particle> rafi,
-                            Particle *output, // to dump to file
-                            int numParticles,
-                            float stepSize,
-                            float minLength,
-                            box1f *magnitudeRange=0/*for diagnostic*/)
-{
-  RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
-
-  const UMeshField::SP &sfield = (const UMeshField::SP &)field;
-  const UMeshField::DD &fieldDD = sfield->getDD(ri);
-
-  CONFIG_KERNEL(update,numParticles)(
-      fieldDD,rafi,output,numParticles,stepSize,minLength,0);
-}
-
 
 
 // ========================================================
@@ -356,16 +182,14 @@ void call_update_UMeshField(const VecField::SP field,
 void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
-  SphericalField field;
-  field.center = vec3f(0.f);
-  field.radius = 1.f;
+  auto field = std::make_shared<SphericalField>();
+  field->center = vec3f(0.f);
+  field->radius = 1.f;
 
-  field.numMCs = (int)cbrtf(ri.commSize);
+  field->numMCs = (int)cbrtf(ri.commSize);
 
-  float halo = field.radius*0.1f;
-  field.mc = makeMacroCell(field.computeWorldBounds(),field.numMCs,ri,halo);
-
-  SphericalField::DD fieldDD = field.getDD(ri);
+  float halo = field->radius*0.1f;
+  field->mc = makeMacroCell(field->computeWorldBounds(),field->numMCs,ri,halo);
 
   int N=5000;
   int localN=iDivUp(N,ri.commSize);
@@ -385,8 +209,8 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                               sizeof(g_appState.roi.bounds),
                               cudaMemcpyHostToDevice));
   }
-  CONFIG_KERNEL(generateRandomSeeds,localN)(
-      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
+  call_generateRandomSeeds(
+      field,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -408,8 +232,8 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   int i=0;
   for (; i<steps; ++i) {
     if (localN) {
-      CONFIG_KERNEL(update,localN)(
-          fieldDD,rafi->getDeviceInterface(),output,localN,0.1f,1e-10f);
+      update<<<iDivUp(localN,1024),1024>>>(
+           field->getDD(ri),rafi->getDeviceInterface(),output,localN,0.1f,1e-10f,nullptr);
     }
     rafi::ForwardResult result = rafi->forwardRays();
     io.append(output,localN,colors.data(),colors.size());
@@ -522,11 +346,9 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
   in.read((char *)values.data(),sizeof(values[0])*values.size());
 
-  StructuredField field(values.data(),dims,org);
-  field.numMCs = gridSize;
-  field.mc = localMC;
-
-  StructuredField::DD fieldDD = field.getDD(ri);
+  auto field = std::make_shared<StructuredField>(values.data(),dims,org);
+  field->numMCs = gridSize;
+  field->mc = localMC;
 
   int N=numParticles;
   int localN=iDivUp(N,ri.commSize);
@@ -546,8 +368,8 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                               sizeof(g_appState.roi.bounds),
                               cudaMemcpyHostToDevice));
   }
-  CONFIG_KERNEL(generateRandomSeeds,localN)(
-      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
+  call_generateRandomSeeds(
+      field,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -571,8 +393,8 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
         CUDA_SAFE_CALL(cudaMemcpy(magrange,&hrange,sizeof(hrange),cudaMemcpyHostToDevice));
       }
 
-      CONFIG_KERNEL_512(update,localN)(
-          fieldDD,rafi->getDeviceInterface(),output,localN,stepsize,minlength,magrange);
+      call_update_StructuredField(
+          field,rafi->getDeviceInterface(),output,localN,stepsize,minlength,magrange);
 
       if (verbose) {
         CUDA_SAFE_CALL(cudaMemcpy(&hrange,magrange,sizeof(hrange),cudaMemcpyDeviceToHost));
@@ -716,18 +538,16 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   std::cout << "rank #" << ri.rankID << " gets " << uvw.size()
     << " out of " << inMesh->wedges.size() << " wedge cells\n";
 
-  UMeshField field(vertices.data(),
-                   indices.data(),
-                   cellIndices.data(),
-                   uvw.data(),
-                   vertices.size(),
-                   indices.size(),
-                   cellIndices.size());
+  auto field = std::make_shared<UMeshField>(vertices.data(),
+                                            indices.data(),
+                                            cellIndices.data(),
+                                            uvw.data(),
+                                            vertices.size(),
+                                            indices.size(),
+                                            cellIndices.size());
 
-  field.numMCs = gridSize;
-  field.mc = localMC;
-
-  UMeshField::DD fieldDD = field.getDD(ri);
+  field->numMCs = gridSize;
+  field->mc = localMC;
 
   int N=300000;
   int localN=iDivUp(N,ri.commSize);
@@ -747,8 +567,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                               sizeof(g_appState.roi.bounds),
                               cudaMemcpyHostToDevice));
   }
-  CONFIG_KERNEL(generateRandomSeeds,localN)(
-      fieldDD,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
+  call_generateRandomSeeds(
+      field,rafi->getDeviceInterface(),output,localN,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -770,8 +590,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   int i=0;
   for (; i<steps; ++i) {
     if (localN) {
-      CONFIG_KERNEL_512(update,localN)(
-          fieldDD,rafi->getDeviceInterface(),output,localN,100.f,1.f);
+      call_update_UMeshField(
+          field,rafi->getDeviceInterface(),output,localN,100.f,1.f);
     }
     rafi::ForwardResult result = rafi->forwardRays();
     io.append(output,localN,colors.data(),colors.size());

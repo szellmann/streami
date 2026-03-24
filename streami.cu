@@ -6,10 +6,7 @@
 #include "streami.h"
 #include "field/StructuredField.h"
 #include "field/UMeshField.h"
-
-#define CONFIG_KERNEL_512(kernel,n) kernel<<<iDivUp(n,512),512>>>
-#define CONFIG_KERNEL_1024(kernel,n) kernel<<<iDivUp(n,1024),1024>>>
-#define CONFIG_KERNEL CONFIG_KERNEL_1024
+#include "gpu/kernels.h"
 
 namespace streami {
 
@@ -69,36 +66,6 @@ MPI_Comm Context::newComm()
 // ========================================================
 // Tracer
 // ========================================================
-
-void call_generateRandomSeeds_StructuredField(const VecField::SP field,
-                                              rafi::DeviceInterface<Particle> rafi,
-                                              Particle *output, // to dump to file
-                                              int numParticles,
-                                              box3f *roi=nullptr,
-                                              bool roiIsSpherical=false);
-
-void call_generateRandomSeeds_UMeshField(const VecField::SP field,
-                                              rafi::DeviceInterface<Particle> rafi,
-                                              Particle *output, // to dump to file
-                                              int numParticles,
-                                              box3f *roi=nullptr,
-                                              bool roiIsSpherical=false);
-
-void call_update_UMeshField(const VecField::SP field,
-                                 rafi::DeviceInterface<Particle> rafi,
-                                 Particle *output, // to dump to file
-                                 int numParticles,
-                                 float stepSize,
-                                 float minLength,
-                                 box1f *magnitudeRange=0/*for diagnostic*/);
-
-void call_update_StructuredField(const VecField::SP field,
-                                 rafi::DeviceInterface<Particle> rafi,
-                                 Particle *output, // to dump to file
-                                 int numParticles,
-                                 float stepSize,
-                                 float minLength,
-                                 box1f *magnitudeRange=0/*for diagnostic*/);
 
 Tracer::Tracer(Context &ctx, const Tracer::Params &p)
   : context(ctx), params(p)
@@ -195,15 +162,8 @@ void Tracer::init()
                               cudaMemcpyHostToDevice));
   }
 
-  if (fieldType == Structured) {
-    call_generateRandomSeeds_StructuredField(
-        field,rafi->getDeviceInterface(),dOutput,localN,d_roi,params.roi.isSpherical);
-  }
-
-  if (fieldType == UMesh) {
-    call_generateRandomSeeds_UMeshField(
-        field,rafi->getDeviceInterface(),dOutput,localN,d_roi,params.roi.isSpherical);
-  }
+  call_generateRandomSeeds(
+      field,rafi->getDeviceInterface(),dOutput,localN,d_roi,params.roi.isSpherical);
 
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));

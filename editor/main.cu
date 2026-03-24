@@ -506,7 +506,7 @@ int main(int argc, char *argv[]) {
         parms.stepSize = atof(argv[++i]);
       }
       if (arg == "-minlength") {
-        parms.minlength = atof(argv[++i]);
+        parms.minLength = atof(argv[++i]);
       }
       if (arg == "-numparticles") {
         parms.numParticles = std::stoi(argv[++i]);

@@ -19,6 +19,9 @@ void call_generateRandomSeeds(const VecField::SP field,
                               box3f *roi,
                               bool roiIsSpherical)
 {
+  if (numParticles <= 0)
+    return;
+
   RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
   MacroCell mc = field->mc;
 
@@ -34,6 +37,9 @@ void call_update_StructuredField(const VecField::SP field,
                                  float minLength,
                                  box1f *magnitudeRange/*for diagnostic*/)
 {
+  if (numParticles <= 0)
+    return;
+
   RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
 
   const StructuredField::SP &sfield = (const StructuredField::SP &)field;
@@ -51,6 +57,9 @@ void call_update_UMeshField(const VecField::SP field,
                             float minLength,
                             box1f *magnitudeRange/*for diagnostic*/)
 {
+  if (numParticles <= 0)
+    return;
+
   RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
 
   const UMeshField::SP &sfield = (const UMeshField::SP &)field;

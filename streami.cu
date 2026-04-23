@@ -120,15 +120,16 @@ bool Tracer::step()
         field,rafi->getDeviceInterface(),dOutput,localN,params.stepSize,params.minLength);
   }
 
+  // Record traced positions before dOutput is overwritten by generateNewParticles
+  auto colors = randomColorsPerID(globalN);
+  appendOutput(colors);
+
   if (params.mode == Params::Streaklines) {
     // generate new particles and emit to current ray forwarding queue:
     generateNewParticles();
   }
 
   rafi::ForwardResult result = rafi->forwardRays();
-
-  auto colors = randomColorsPerID(globalN);
-  appendOutput(colors);
 
   localN = result.numRaysInIncomingQueueThisRank;
 
@@ -177,7 +178,12 @@ void Tracer::init()
 
   hLines.clear();
 
+  injectionCount = 0;
   generateNewParticles();
+
+  // Record initial seed positions (t_0 injection)
+  auto colors = randomColorsPerID(globalN);
+  appendOutput(colors);
 
   rafi->forwardRays();
 }
@@ -207,9 +213,8 @@ int Tracer::generateNewParticles()
 
   auto field = fields[currentTimeStep];
   call_generateRandomSeeds(
-      field,rafi->getDeviceInterface(),dOutput,batchN,d_roi,params.roi.isSpherical);
-  auto colors = randomColorsPerID(globalN);
-  appendOutput(colors);
+      field,rafi->getDeviceInterface(),dOutput,batchN,injectionCount*globalN,d_roi,params.roi.isSpherical);
+  injectionCount++;
 
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
@@ -247,16 +252,36 @@ void Tracer::appendOutput(const std::vector<vec3f> &vertexColors)
                             dOutput,
                             sizeof(dOutput[0])*localN,
                             cudaMemcpyDefault));
-  std::sort(thisGen.begin(),thisGen.end(),
-      [](const Particle &p0, const Particle &p1){ return p0.ID<p1.ID; });
 
-  hLines.resize(std::max((int)hLines.size(),thisGen.back().ID+1));
+  if (params.mode == Params::Streaklines) {
+    // For streaklines: hLines[seedIdx][injTime] = current position of that particle.
+    // ID encodes both: seedIdx = ID % globalN, injTime = ID / globalN.
+    // We update in place (not push_back) so each slot always holds the CURRENT position,
+    // giving a snapshot of the streakline rather than a trajectory history.
+    if ((int)hLines.size() < globalN)
+      hLines.resize(globalN);
 
-  for (int i=0; i<localN; ++i) {
-    assert(hLines.size() > thisGen[i].ID);
-    vec3f color
-        = vertexColors.empty() ? vec3f(0.0f) : vertexColors[thisGen[i].ID];
-    hLines[thisGen[i].ID].push_back({thisGen[i],color});
+    for (int i = 0; i < localN; ++i) {
+      const Particle &p = thisGen[i];
+      if (isnan(p.P.x)) continue;
+      int seedIdx = p.ID % globalN;
+      int injTime = p.ID / globalN;
+      auto &line = hLines[seedIdx];
+      if ((int)line.size() <= injTime)
+        line.resize(injTime + 1);
+      line[injTime] = {p, randomColor(p.ID)};
+    }
+  } else {
+    std::sort(thisGen.begin(),thisGen.end(),
+        [](const Particle &p0, const Particle &p1){ return p0.ID<p1.ID; });
+
+    hLines.resize(std::max((int)hLines.size(),thisGen.back().ID+1));
+
+    for (int i=0; i<localN; ++i) {
+      assert(hLines.size() > thisGen[i].ID);
+      vec3f color = randomColor(thisGen[i].ID); //vec3f(1.0f);
+      hLines[thisGen[i].ID].push_back({thisGen[i],color});
+    }
   }
 }
 

@@ -197,6 +197,7 @@ struct Tracer {
   std::vector<Line> hLines;
 
   int globalN, localN, maxN;
+  int injectionCount{0};
   size_t currentTimeStep{0ull};
   Particle *dOutput{nullptr};
 

@@ -1,0 +1,4 @@
+*.raw
+tools/generators/gen_vectors
+tools/generators/gen_vectors_tribbles
+tools/generators/gen_vectors_tribbles_timesteps

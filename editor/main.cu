@@ -225,7 +225,7 @@ static anari::World generateScene(anari::Device device,
 
 static anari::World generateScene(anari::Device device,
                                   const std::vector<vec3f> &values,
-                                  vec3i org, vec3i dims)
+                                  vec3f org, vec3f spacing, vec3i dims)
 {
   float minValue{1e30f};
   float maxValue{-1e30f};
@@ -248,7 +248,12 @@ static anari::World generateScene(anari::Device device,
       dims.z);
   anari::setAndReleaseParameter(device, g_appState.field, "data", scalar);
 
+  anari::math::float3 anariOrigin(org.x,org.y,org.z);
+  anari::math::float3 anariSpacing(spacing.x,spacing.y,spacing.z);
+
   anari::commitParameters(device, g_appState.field);
+  anari::setParameter(device, g_appState.field, "origin", anariOrigin);
+  anari::setParameter(device, g_appState.field, "spacing", anariSpacing);
 
   auto &volume = g_appState.volume;
   volume = anari::newObject<anari::Volume>(device, "transferFunction1D");
@@ -476,7 +481,8 @@ int main(int argc, char *argv[]) {
 
   std::vector<std::string> fileNames;
   streami::Tracer::Params::Mode mode{streami::Tracer::Params::Streamlines};
-  vec3i org=0.f, dims=0.f;
+  vec3i dims=0.f;
+  vec3f org=0.f, spacing=1.f;
   for (int i=1;i<argc;i++) {
     std::string arg(argv[i]);
     if (arg[0] == '-') {
@@ -484,6 +490,11 @@ int main(int argc, char *argv[]) {
         dims.x = std::stoi(argv[++i]);
         dims.y = std::stoi(argv[++i]);
         dims.z = std::stoi(argv[++i]);
+      }
+      if (arg == "-spacing") {
+        spacing.x = atof(argv[++i]);
+        spacing.y = atof(argv[++i]);
+        spacing.z = atof(argv[++i]);
       }
       if (arg == "-org") {
         org.x = std::stoi(argv[++i]);
@@ -639,22 +650,19 @@ int main(int argc, char *argv[]) {
       std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
       in.read((char *)values.data(),sizeof(values[0])*values.size());
 
-      worldBounds = box3f{
-        {(float)org.x,(float)org.y,(float)org.z},
-        {(float)dims.x,(float)dims.y,(float)dims.z}
-      };
+      worldBounds = box3f{org,org+vec3f(dims)*spacing};
 
       vec3i gridSize(1);
       float halo(20.f);
       streami::MacroCell localMC = streami::makeMacroCell(worldBounds,gridSize,ri,halo);
 
-      field = std::make_shared<streami::StructuredField>(values.data(),dims,org);
+      field = std::make_shared<streami::StructuredField>(values.data(),dims,org,spacing);
       field->numMCs = gridSize;
       field->mc = localMC;
       tracer.setField((const streami::StructuredField::SP &)field, f);
 
       if (f == 0) {
-        world = generateScene(device,values,org,dims);
+        world = generateScene(device,values,org,spacing,dims);
       }
     }
   }

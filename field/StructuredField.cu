@@ -3,8 +3,8 @@
 
 namespace streami {
 
-StructuredField::StructuredField(vec3f *values, vec3i dims, vec3i org)
-  : dims(dims), org(org)
+StructuredField::StructuredField(vec3f *values, vec3i dims, vec3f org, vec3f spacing)
+  : dims(dims), org(org), spacing(spacing)
 {
   size_t numVoxels = dims.x*size_t(dims.y)*dims.z;
   CUDA_SAFE_CALL(cudaMalloc(&d_values,sizeof(d_values[0])*numVoxels));
@@ -22,8 +22,8 @@ StructuredField::~StructuredField()
 box3f StructuredField::computeWorldBounds() const
 {
   return {
-    {(float)org.x,(float)org.y,(float)org.z},
-    {(float)(org.x+dims.x),(float)(org.y+dims.y),(float)(org.z+dims.z)}
+    {org.x,org.y,org.z},
+    {org.x+dims.x*spacing.x,org.y+dims.y*spacing.y,org.z+dims.z*spacing.z}
   };
 }
 
@@ -31,9 +31,10 @@ StructuredField::DD StructuredField::getDD(const RankInfo &ri)
 {
   DD dd;
   (VecField::DD &)dd = VecField::getDD(ri);
-  dd.values = d_values;
-  dd.dims   = dims;
-  dd.org    = org;
+  dd.values  = d_values;
+  dd.dims    = dims;
+  dd.org     = org;
+  dd.spacing = spacing;
   return dd;
 }
 

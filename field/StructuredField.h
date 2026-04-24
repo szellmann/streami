@@ -16,9 +16,10 @@ struct StructuredField : public VecField {
       if (!worldBounds.contains(P))
         return false;
 
-      int px(P.x);
-      int py(P.y);
-      int pz(P.z);
+      vec3f PP = (P-org)/spacing;
+      int px(PP.x);
+      int py(PP.y);
+      int pz(PP.z);
       size_t idx = linearIndex(px,py,pz,(int *)&dims);
       if (idx>=dims.x*size_t(dims.y)*dims.z) {
         printf("out-of-range access: %f,%f,%f\n",P.x,P.y,P.z);
@@ -29,11 +30,15 @@ struct StructuredField : public VecField {
     }
 
     vec3f *values;
-    vec3i dims, org;
+    vec3i dims;
+    vec3f org, spacing;
   };
 
   /* host interface for field */
-  StructuredField(vec3f *values, vec3i dims, vec3i org = {0,0,0});
+  StructuredField(vec3f *values,
+                  vec3i dims,
+                  vec3f org = {0.f,0.f,0.f},
+                  vec3f spacing = {1.f,1.f,1.f});
   ~StructuredField();
 
   box3f computeWorldBounds() const override;
@@ -43,7 +48,8 @@ struct StructuredField : public VecField {
 private:
   vec3f *d_values{nullptr};
   vec3i dims{0,0,0};
-  vec3i org{0,0,0};
+  vec3f org{0,0,0};
+  vec3f spacing{0,0,0};
 };
 
 } // streami

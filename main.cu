@@ -210,7 +210,7 @@ void main_Spherical(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                               cudaMemcpyHostToDevice));
   }
   call_generateRandomSeeds(
-      field,rafi->getDeviceInterface(),output,localN,0,d_roi,g_appState.roi.isSpherical);
+      field,rafi->getDeviceInterface(),output,localN,-1,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -369,7 +369,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                               cudaMemcpyHostToDevice));
   }
   call_generateRandomSeeds(
-      field,rafi->getDeviceInterface(),output,localN,0,d_roi,g_appState.roi.isSpherical);
+      field,rafi->getDeviceInterface(),output,localN,-1,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }
@@ -568,7 +568,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
                               cudaMemcpyHostToDevice));
   }
   call_generateRandomSeeds(
-      field,rafi->getDeviceInterface(),output,localN,0,d_roi,g_appState.roi.isSpherical);
+      field,rafi->getDeviceInterface(),output,localN,-1,d_roi,g_appState.roi.isSpherical);
   if (d_roi) {
     CUDA_SAFE_CALL(cudaFree(d_roi));
   }

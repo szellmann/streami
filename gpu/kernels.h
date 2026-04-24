@@ -13,7 +13,7 @@ void call_generateRandomSeeds(const VecField::SP field,
                               rafi::DeviceInterface<Particle> rafi,
                               Particle *output, // to dump to file
                               int numParticles,
-                              int idOffset=0,
+                              int batchID=-1,
                               box3f *roi=nullptr,
                               bool roiIsSpherical=false);
 

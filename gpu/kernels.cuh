@@ -17,7 +17,7 @@ static void generateRandomSeeds(RankInfo ri,
                                 rafi::DeviceInterface<Particle> rafi,
                                 Particle *output, // to dump to file
                                 int numParticles,
-                                int idOffset,
+                                int batchOffset=0,
                                 box3f *roi=nullptr,
                                 bool roiIsSpherical=false)
 {
@@ -25,7 +25,7 @@ static void generateRandomSeeds(RankInfo ri,
   if (particleID >= numParticles) return;
 
   Particle p;
-  p.ID = idOffset + numParticles*ri.rankID+particleID;
+  p.ID = batchOffset+numParticles*ri.rankID+particleID;
 
   if (roi && !roiIsSpherical && !roi->overlaps(mc.bounds)) {
     p.P = {NAN,NAN,NAN};

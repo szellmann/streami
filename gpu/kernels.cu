@@ -16,20 +16,18 @@ void call_generateRandomSeeds(const VecField::SP field,
                               rafi::DeviceInterface<Particle> rafi,
                               Particle *output, // to dump to file
                               int numParticles,
-                              int idOffset,
+                              int batchOffset,
                               box3f *roi,
                               bool roiIsSpherical)
 {
-  if(numParticles <= 0) {
-    std::cerr << "Error: call_generateRandomSeeds: numParticles must be > 0\n";
+  if (numParticles <= 0)
     return;
-  }
 
   RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
   MacroCell mc = field->mc;
 
   CONFIG_KERNEL(generateRandomSeeds,numParticles)(
-      ri,mc,rafi,output,numParticles,idOffset,roi,roiIsSpherical);
+      ri,mc,rafi,output,numParticles,batchOffset,roi,roiIsSpherical);
 }
 
 void call_update_StructuredField(const VecField::SP field,
@@ -40,10 +38,8 @@ void call_update_StructuredField(const VecField::SP field,
                                  float minLength,
                                  box1f *magnitudeRange/*for diagnostic*/)
 {
-  if(numParticles <= 0) {
-    std::cerr << "Error: call_update_StructuredField: numParticles must be > 0\n";
+  if (numParticles <= 0)
     return;
-  }
 
   RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
 
@@ -62,6 +58,9 @@ void call_update_UMeshField(const VecField::SP field,
                             float minLength,
                             box1f *magnitudeRange/*for diagnostic*/)
 {
+  if (numParticles <= 0)
+    return;
+
   RankInfo ri{rafi.mpi.rank,rafi.mpi.size};
 
   const UMeshField::SP &sfield = (const UMeshField::SP &)field;

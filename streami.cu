@@ -120,15 +120,15 @@ bool Tracer::step()
         field,rafi->getDeviceInterface(),dOutput,localN,params.stepSize,params.minLength);
   }
 
+  auto colors = randomColorsPerID(globalN);
+  appendOutput(colors);
+
   if (params.mode == Params::Streaklines) {
     // generate new particles and emit to current ray forwarding queue:
     generateNewParticles();
   }
 
   rafi::ForwardResult result = rafi->forwardRays();
-
-  auto colors = randomColorsPerID(globalN);
-  appendOutput(colors);
 
   localN = result.numRaysInIncomingQueueThisRank;
 
@@ -165,6 +165,7 @@ void Tracer::init()
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
   currentTimeStep = 0;
+  currentTimeStepTotal = 0;
 
   globalN=params.numParticles;
   localN=iDivUp(globalN,ri.commSize);
@@ -204,10 +205,11 @@ int Tracer::generateNewParticles()
   RankInfo ri{rafi->mpi.rank,rafi->mpi.size};
 
   size_t batchN = globalN/ri.commSize;
+  size_t batchOffset = currentTimeStepTotal*globalN;
 
   auto field = fields[currentTimeStep];
   call_generateRandomSeeds(
-      field,rafi->getDeviceInterface(),dOutput,batchN,d_roi,params.roi.isSpherical);
+      field,rafi->getDeviceInterface(),dOutput,batchN,batchOffset,d_roi,params.roi.isSpherical);
   auto colors = randomColorsPerID(globalN);
   appendOutput(colors);
 
@@ -233,6 +235,7 @@ void Tracer::insertField(const VecField::SP &field, size_t timeStep)
 void Tracer::doTimeStep()
 {
   currentTimeStep = (currentTimeStep + 1) % fields.size();
+  currentTimeStepTotal++;
 
   std::cout << "time step: " << currentTimeStep << '\n';
 }
@@ -247,16 +250,34 @@ void Tracer::appendOutput(const std::vector<vec3f> &vertexColors)
                             dOutput,
                             sizeof(dOutput[0])*localN,
                             cudaMemcpyDefault));
-  std::sort(thisGen.begin(),thisGen.end(),
-      [](const Particle &p0, const Particle &p1){ return p0.ID<p1.ID; });
 
-  hLines.resize(std::max((int)hLines.size(),thisGen.back().ID+1));
+  if (params.mode == Params::Streaklines) {
+    if ((int)hLines.size() < globalN)
+      hLines.resize(globalN);
 
-  for (int i=0; i<localN; ++i) {
-    assert(hLines.size() > thisGen[i].ID);
-    vec3f color
-        = vertexColors.empty() ? vec3f(0.0f) : vertexColors[thisGen[i].ID];
-    hLines[thisGen[i].ID].push_back({thisGen[i],color});
+    for (int i=0; i<localN; ++i) {
+      const Particle &p = thisGen[i];
+      if (isnan(p.P.x)) continue;
+      // ID encodes both particle ID and injection time:
+      int pID = p.ID % globalN;
+      int pt  = p.ID / globalN;
+      auto &line = hLines[pID];
+      if ((int)line.size() <= pt)
+        line.resize(pt+1);
+      line[pt] = {p, randomColor(p.ID)};
+    }
+  } else {
+    std::sort(thisGen.begin(),thisGen.end(),
+        [](const Particle &p0, const Particle &p1){ return p0.ID<p1.ID; });
+
+    hLines.resize(std::max((int)hLines.size(),thisGen.back().ID+1));
+
+    for (int i=0; i<localN; ++i) {
+      assert(hLines.size() > thisGen[i].ID);
+      vec3f color
+          = vertexColors.empty() ? vec3f(0.0f) : vertexColors[thisGen[i].ID];
+      hLines[thisGen[i].ID].push_back({thisGen[i],color});
+    }
   }
 }
 

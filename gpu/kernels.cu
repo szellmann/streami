@@ -16,6 +16,7 @@ void call_generateRandomSeeds(const VecField::SP field,
                               rafi::DeviceInterface<Particle> rafi,
                               Particle *output, // to dump to file
                               int numParticles,
+                              int batchOffset,
                               box3f *roi,
                               bool roiIsSpherical)
 {
@@ -26,7 +27,7 @@ void call_generateRandomSeeds(const VecField::SP field,
   MacroCell mc = field->mc;
 
   CONFIG_KERNEL(generateRandomSeeds,numParticles)(
-      ri,mc,rafi,output,numParticles,roi,roiIsSpherical);
+      ri,mc,rafi,output,numParticles,batchOffset,roi,roiIsSpherical);
 }
 
 void call_update_StructuredField(const VecField::SP field,

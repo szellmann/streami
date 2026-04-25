@@ -49,7 +49,7 @@ static void generateRandomSeeds(RankInfo ri,
     }
   } while (true);
   rafi.emitOutgoing(p,ri.rankID); // only on ours!
-  printf("generate Random; rank: %i -- position: %f,%f,%f\n",ri.rankID,p.P.x,p.P.y,p.P.z);
+  //printf("generate Random; rank: %i -- position: %f,%f,%f\n",ri.rankID,p.P.x,p.P.y,p.P.z);
   // for dumping:
   output[particleID] = p;
 }
@@ -73,7 +73,7 @@ static void update(const Field field,
 
   Particle p = rafi.getIncoming(particleID);
   const vec3f P0 = p.P;
-  printf("ID: %i, pos: %f,%f,%f\n",p.ID,P0.x,P0.y,P0.z);
+//  printf("ID: %i, pos: %f,%f,%f\n",p.ID,P0.x,P0.y,P0.z);
 
   if (isnan(P0.x) || isnan(P0.y) || isnan(P0.z))
     return;

@@ -78,7 +78,6 @@ Tracer::Tracer(Context &ctx, const Tracer::Params &p)
 void Tracer::setField(const StructuredField::SP &f, size_t timeStep)
 {
   insertField(f,timeStep);
-  assert(fileType == Undefined);
   fieldType = Structured;
   lastInitRequest = newTimeStamp();
 }
@@ -86,7 +85,6 @@ void Tracer::setField(const StructuredField::SP &f, size_t timeStep)
 void Tracer::setField(const UMeshField::SP &f, size_t timeStep)
 {
   insertField(f,timeStep);
-  assert(fileType == Undefined);
   fieldType = UMesh;
   lastInitRequest = newTimeStamp();
 }

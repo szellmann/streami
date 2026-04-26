@@ -268,7 +268,8 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   std::ifstream in(argv[1]);
 
-  vec3i org{0};
+  vec3f org{0};
+  vec3f spacing{1};
   vec3i dims{0}; // input dims
   vec3i gridSize{1};
 
@@ -287,10 +288,15 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
         dims.y = std::stoi(argv[++i]);
         dims.z = std::stoi(argv[++i]);
       }
+      if (arg == "-spacing") {
+        spacing.x = atof(argv[++i]);
+        spacing.y = atof(argv[++i]);
+        spacing.z = atof(argv[++i]);
+      }
       if (arg == "-org") {
-        org.x = std::stoi(argv[++i]);
-        org.y = std::stoi(argv[++i]);
-        org.z = std::stoi(argv[++i]);
+        org.x = atof(argv[++i]);
+        org.y = atof(argv[++i]);
+        org.z = atof(argv[++i]);
       }
       if (arg == "-gx") {
         gridSize.x = std::stoi(argv[++i]);
@@ -336,17 +342,14 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     return;
   }
 
-  box3f worldBounds{
-    {(float)org.x,(float)org.y,(float)org.z},
-    {(float)dims.x,(float)dims.y,(float)dims.z}
-  };
+  box3f worldBounds{org,org+vec3f(dims)*spacing};
 
   MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,halo);
 
   std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
   in.read((char *)values.data(),sizeof(values[0])*values.size());
 
-  auto field = std::make_shared<StructuredField>(values.data(),dims,org);
+  auto field = std::make_shared<StructuredField>(values.data(),dims,org,spacing);
   field->numMCs = gridSize;
   field->mc = localMC;
 

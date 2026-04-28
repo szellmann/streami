@@ -477,7 +477,7 @@ int main(int argc, char *argv[]) {
 
   streami::Tracer tracer(ctx,parms);
 
-  Pipeline pl(argc, argv, "ex00_hello_dvr_course");
+  Pipeline pl(argc, argv, "Streami Editor");
 
   std::vector<std::string> fileNames;
   streami::Tracer::Params::Mode mode{streami::Tracer::Params::Streamlines};

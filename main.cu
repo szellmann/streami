@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 // umesh
@@ -114,6 +115,30 @@ struct ParticleIO {
 // ========================================================
 // Other helpers
 // ========================================================
+
+inline bool endsWith(const std::string &s, const std::string &suffix) {
+  if (s.length() < suffix.length())
+    return false;
+
+  return s.substr(s.size()-suffix.size(),suffix.size()) == suffix;
+}
+
+static
+size_t getOrAddVertex(
+    umesh::vec3i pos,
+    std::map<umesh::vec3i,size_t> &mapping,
+    umesh::UMesh::SP umesh,
+    float value)
+{
+  auto it = mapping.find(pos);
+  if (it != mapping.end()) return it->second;
+
+  size_t newID = umesh->vertices.size();
+  umesh->vertices.push_back(umesh::vec3f(pos.x,pos.y,pos.z));
+  umesh->perVertex->values.push_back(value);
+  mapping[pos] = newID;
+  return newID;
+}
 
 __host__ __device__
 inline vec3f randomColor(unsigned idx)
@@ -442,7 +467,60 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     return;
   }
 
-  umesh::UMesh::SP inMesh = umesh::UMesh::loadFrom(argv[1]);
+  umesh::UMesh::SP inMesh{nullptr};
+  if (endsWith(argv[1],".raw")) {
+    vec3i dims{1};
+    for (int i=2;i<argc;i++) {
+      std::string arg(argv[i]);
+      if (arg[0] == '-') {
+        if (arg == "-dims") {
+          dims.x = std::stoi(argv[++i]);
+          dims.y = std::stoi(argv[++i]);
+          dims.z = std::stoi(argv[++i]);
+        }
+      }
+    }
+
+    // mostly for experimenting, if we get voxels
+    // convert them to hexes:
+
+    inMesh = std::make_shared<umesh::UMesh>();
+    inMesh->perVertex = std::make_shared<umesh::Attribute>();
+
+    std::ifstream in(argv[1]);
+    std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
+    in.read((char *)values.data(),sizeof(values[0])*values.size());
+
+    std::map<umesh::vec3i,size_t> vertexID;
+
+    for (int z=0;z<dims.z;++z) {
+      for (int y=0;y<dims.y;++y) {
+        for (int x=0;x<dims.x;++x) {
+          umesh::UMesh::Hex hex;
+          umesh::vec3i pos(x,y,z);
+          size_t index = x+y*dims.x+z*size_t(dims.x)*dims.y;
+          auto value = values[index];
+          hex.base.x = (int)getOrAddVertex(pos+umesh::vec3i(0,0,0),vertexID,inMesh,value.x);
+          hex.base.y = (int)getOrAddVertex(pos+umesh::vec3i(0,0,1),vertexID,inMesh,value.y);
+          hex.base.z = (int)getOrAddVertex(pos+umesh::vec3i(0,1,1),vertexID,inMesh,value.z);
+          hex.base.w = (int)getOrAddVertex(pos+umesh::vec3i(0,1,0),vertexID,inMesh,value.x);
+          hex.top.x = (int)getOrAddVertex(pos+umesh::vec3i(1,0,0),vertexID,inMesh,value.y);
+          hex.top.y = (int)getOrAddVertex(pos+umesh::vec3i(1,0,1),vertexID,inMesh,value.z);
+          hex.top.z = (int)getOrAddVertex(pos+umesh::vec3i(1,1,1),vertexID,inMesh,value.x);
+          hex.top.w = (int)getOrAddVertex(pos+umesh::vec3i(1,1,0),vertexID,inMesh,value.y);
+
+          inMesh->hexes.push_back(hex);
+        }
+      }
+    }
+
+    inMesh->finalize();
+
+    std::cout << "Constructed UMesh with " << inMesh->vertices.size() << " vertices and "
+      << inMesh->hexes.size() << " hexes from " << argv[1] << '\n';
+  } else {
+    inMesh = umesh::UMesh::loadFrom(argv[1]);
+  }
 
   vec3i gridSize{1};
   for (int i=2;i<argc;i++) {
@@ -480,60 +558,68 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   std::vector<vec3f> vertices;
   std::vector<int> indices;
   std::vector<int> cellIndices;
+  std::vector<uint8_t> cellTypes;
   std::vector<vec3f> uvw;
 
   std::vector<int> old2new(inMesh->vertices.size(),-1);
 
-  for (size_t i=0; i<inMesh->wedges.size(); ++i) {
-    bool ours = false;
-    for (int j=0; j<6; ++j) {
-      int vertID = inMesh->wedges[i][j];
-      auto vv = inMesh->vertices[vertID];
-      vec3f v(vv.x,vv.y,vv.z);
-      if (localMC.domain.contains(v)) {
-        ours = true;
-        break;
+  auto compactVertices = [&](auto &elems, int stride) {
+    for (size_t i=0; i<elems.size(); ++i) {
+      bool ours = false;
+      for (int j=0; j<stride; ++j) {
+        int vertID = elems[i][j];
+        auto vv = inMesh->vertices[vertID];
+        vec3f v(vv.x,vv.y,vv.z);
+        if (localMC.domain.contains(v)) {
+          ours = true;
+          break;
+        }
+      }
+
+      if (!ours) continue;
+
+      for (int j=0; j<stride; ++j) {
+        int vertID = elems[i][j];
+        auto vv = inMesh->vertices[vertID];
+        vec3f v(vv.x,vv.y,vv.z);
+        if (old2new[vertID] < 0) {
+          old2new[vertID] = (int)vertices.size();
+          vertices.push_back(v);
+        }
       }
     }
+  };
 
-    if (!ours) continue;
-
-    for (int j=0; j<6; ++j) {
-      int vertID = inMesh->wedges[i][j];
-      auto vv = inMesh->vertices[vertID];
-      vec3f v(vv.x,vv.y,vv.z);
-      if (old2new[vertID] < 0) {
-        old2new[vertID] = (int)vertices.size();
-        vertices.push_back(v);
+  auto makeCells = [&](auto &elems, uint8_t type, int stride) {
+    for (size_t i=0, cellIndex=0; i<elems.size(); ++i) {
+      for (int j=0; j<stride; ++j) {
+        int I = old2new[elems[i][j]];
+        if (I<0) // not ours
+          continue;
+        indices.push_back(I);
       }
+
+      cellIndices.push_back(cellIndex);
+      cellTypes.push_back(type);
+      cellIndex += stride;
+      // u/v/w direction vectors stored in
+      // the first three vertices:
+      float u = inMesh->perVertex->values[elems[i][0]];
+      float v = inMesh->perVertex->values[elems[i][1]];
+      float w = inMesh->perVertex->values[elems[i][2]];
+      uvw.push_back({u,v,w});
     }
-  }
+  };
 
-  // TODO: for now only wedges...
+  compactVertices(inMesh->tets,4);
+  compactVertices(inMesh->pyrs,5);
+  compactVertices(inMesh->wedges,6);
+  compactVertices(inMesh->hexes,8);
 
-  for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i) {
-    int I[6];
-    for (int j=0; j<6; ++j) {
-      I[j] = old2new[inMesh->wedges[i][j]];
-    }
-    if (I[0]<0 || I[1]<0 || I[2]<0 || I[3]<0 || I[4]<0 || I[5]<0) // not ours!
-      continue;
-
-    indices.push_back(I[0]);
-    indices.push_back(I[1]);
-    indices.push_back(I[2]);
-    indices.push_back(I[3]);
-    indices.push_back(I[4]);
-    indices.push_back(I[5]);
-    cellIndices.push_back(cellIndex);
-    cellIndex += 6;
-    // u/v/w direction vectors stored in
-    // the first three vertices:
-    float u = inMesh->perVertex->values[inMesh->wedges[i][0]];
-    float v = inMesh->perVertex->values[inMesh->wedges[i][1]];
-    float w = inMesh->perVertex->values[inMesh->wedges[i][2]];
-    uvw.push_back({u,v,w});
-  }
+  makeCells(inMesh->tets,VTK_TET_,4);
+  makeCells(inMesh->pyrs,VTK_PYR_,5);
+  makeCells(inMesh->wedges,VTK_WEDGE_,6);
+  makeCells(inMesh->hexes,VTK_HEX_,8);
 
   std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
     << " out of " << inMesh->vertices.size() << " vertices\n";
@@ -544,6 +630,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   auto field = std::make_shared<UMeshField>(vertices.data(),
                                             indices.data(),
                                             cellIndices.data(),
+                                            cellTypes.data(),
                                             uvw.data(),
                                             vertices.size(),
                                             indices.size(),
@@ -665,8 +752,8 @@ int main(int argc, char **argv) {
 
   rafi::HostContext<Particle> *rafi = rafi::createContext<Particle>(MPI_COMM_WORLD, 0);
   //main_Spherical(argc,argv,rafi);
-  //main_UMesh(argc,argv,rafi);
-  main_RAW(argc,argv,rafi);
+  main_UMesh(argc,argv,rafi);
+  //main_RAW(argc,argv,rafi);
 
   RAFI_MPI_CALL(Finalize());
 }

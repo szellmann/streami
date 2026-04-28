@@ -71,7 +71,7 @@ namespace streami {
   }
 
   __both__
-  inline bool intersectPyrEXT(float &value,
+  inline bool intersectPyrEXT(vec3f &value,
                               const vec3f &P,
                               const vec4f _v0,
                               const vec4f _v1,
@@ -155,11 +155,17 @@ namespace streami {
                          pcoords[1] >= lowerlimit && pcoords[1] <= upperlimit &&
                          pcoords[2] >= lowerlimit && pcoords[2] <= upperlimit)) {
       // Evaluation
+      #if 0
       float val = 0.f;
       for (int i = 0; i < 5; i++) {
         val += weights[i] * V[i].w;
       }
       value = val;
+      #else
+      value.x = V[0].w;
+      value.y = V[1].w;
+      value.z = V[2].w;
+      #endif
 
       return true;
     }
@@ -373,7 +379,7 @@ namespace streami {
   }
 
   __both__
-  inline bool intersectHexEXT(float &value,
+  inline bool intersectHexEXT(vec3f &value,
                               const vec3f &P,
                               const vec4f v0,
                               const vec4f v1,
@@ -460,11 +466,17 @@ namespace streami {
                          pcoords[1] >= lowerlimit && pcoords[1] <= upperlimit &&
                          pcoords[2] >= lowerlimit && pcoords[2] <= upperlimit)) {
       // Evaluation
+      #if 0
       float val = 0.f;
       for (int i=0; i<8; ++i) {
         val += weights[i] * V[i].w;
       }
       value = val;
+      #else
+      value.x = V[0].w;
+      value.y = V[1].w;
+      value.z = V[2].w;
+      #endif
 
       return true;
     }

@@ -5,9 +5,17 @@
 #include "cuBQL/traversal/fixedBoxQuery.h"
 // ours
 #include "streami.h"
+#include "Plane.h"
 #include "UElems.h"
 
 namespace streami {
+
+enum {
+  VTK_TET_ = 10,
+  VTK_HEX_ = 12,
+  VTK_WEDGE_ = 13,
+  VTK_PYR_ = 14,
+};
 
 struct UMeshField : public VecField {
 
@@ -31,16 +39,56 @@ struct UMeshField : public VecField {
       {
         const int *I = indices + cellIndices[primID];
         const vec3f dir = uvw[primID];
-        // Hack direction vector into w:
-        const vec4f v0(vertices[I[0]],dir.x);
-        const vec4f v1(vertices[I[1]],dir.y);
-        const vec4f v2(vertices[I[2]],dir.z);
-        const vec4f v3(vertices[I[3]],dir.x);
-        const vec4f v4(vertices[I[4]],dir.y);
-        const vec4f v5(vertices[I[5]],dir.z);
-        if (intersectWedgeEXT(value,P,v0,v1,v2,v3,v4,v5)) {
-          hit = true;
-          return CUBQL_TERMINATE_TRAVERSAL;
+        if (cellTypes[primID] == VTK_TET_) {
+          // Hack direction vector into w:
+          const vec4f v0(vertices[I[0]],dir.x);
+          const vec4f v1(vertices[I[1]],dir.y);
+          const vec4f v2(vertices[I[2]],dir.z);
+          const vec4f v3(vertices[I[3]],dir.x);
+          if (intersectTet(value,P,v0,v1,v2,v3)) {
+            hit = true;
+            return CUBQL_TERMINATE_TRAVERSAL;
+          }
+        }
+        if (cellTypes[primID] == VTK_PYR_) {
+          // Hack direction vector into w:
+          const vec4f v0(vertices[I[0]],dir.x);
+          const vec4f v1(vertices[I[1]],dir.y);
+          const vec4f v2(vertices[I[2]],dir.z);
+          const vec4f v3(vertices[I[3]],dir.x);
+          const vec4f v4(vertices[I[4]],dir.y);
+          if (intersectPyrEXT(value,P,v0,v1,v2,v3,v4)) {
+            hit = true;
+            return CUBQL_TERMINATE_TRAVERSAL;
+          }
+        }
+        if (cellTypes[primID] == VTK_WEDGE_) {
+          // Hack direction vector into w:
+          const vec4f v0(vertices[I[0]],dir.x);
+          const vec4f v1(vertices[I[1]],dir.y);
+          const vec4f v2(vertices[I[2]],dir.z);
+          const vec4f v3(vertices[I[3]],dir.x);
+          const vec4f v4(vertices[I[4]],dir.y);
+          const vec4f v5(vertices[I[5]],dir.z);
+          if (intersectWedgeEXT(value,P,v0,v1,v2,v3,v4,v5)) {
+            hit = true;
+            return CUBQL_TERMINATE_TRAVERSAL;
+          }
+        }
+        if (cellTypes[primID] == VTK_HEX_) {
+          // Hack direction vector into w:
+          const vec4f v0(vertices[I[0]],dir.x);
+          const vec4f v1(vertices[I[1]],dir.y);
+          const vec4f v2(vertices[I[2]],dir.z);
+          const vec4f v3(vertices[I[3]],dir.x);
+          const vec4f v4(vertices[I[4]],dir.y);
+          const vec4f v5(vertices[I[5]],dir.z);
+          const vec4f v6(vertices[I[6]],dir.x);
+          const vec4f v7(vertices[I[7]],dir.y);
+          if (intersectHexEXT(value,P,v0,v1,v2,v3,v4,v5,v6,v7)) {
+            hit = true;
+            return CUBQL_TERMINATE_TRAVERSAL;
+          }
         }
         return CUBQL_CONTINUE_TRAVERSAL;
       };
@@ -48,10 +96,11 @@ struct UMeshField : public VecField {
       return hit;
     }
 
-    vec3f *vertices;
-    int   *indices;
-    int   *cellIndices;
-    vec3f *uvw;
+    vec3f   *vertices;
+    int     *indices;
+    int     *cellIndices;
+    uint8_t *cellTypes;
+    vec3f   *uvw;
     int numVertices;
     int numIndices;
     int numCells;
@@ -60,8 +109,8 @@ struct UMeshField : public VecField {
   };
 
   /* host interface for field */
-  UMeshField(vec3f *vertices, int *indices, int *cellIndices, vec3f *uvw,
-             size_t numVertices, size_t numIndices, size_t numCells);
+  UMeshField(vec3f *vertices, int *indices, int *cellIndices, uint8_t *cellTypes,
+             vec3f *uvw, size_t numVertices, size_t numIndices, size_t numCells);
   ~UMeshField();
 
   box3f computeWorldBounds() const override;
@@ -69,15 +118,16 @@ struct UMeshField : public VecField {
   DD getDD(const RankInfo &ri);
 
  private:
-  vec3f *d_vertices{nullptr};
-  int   *d_indices{nullptr};
-  int   *d_cellIndices{nullptr};
-  vec3f *d_uvw{nullptr};
-  size_t numVertices{0ull};
-  size_t numIndices{0ull};
-  size_t numCells{0ull};
-  bvh_t bvh = {0,0,0,0};
-  box3f worldBounds;
+  vec3f   *d_vertices{nullptr};
+  int     *d_indices{nullptr};
+  int     *d_cellIndices{nullptr};
+  uint8_t *d_cellTypes{nullptr};
+  vec3f   *d_uvw{nullptr};
+  size_t   numVertices{0ull};
+  size_t   numIndices{0ull};
+  size_t   numCells{0ull};
+  bvh_t    bvh = {0,0,0,0};
+  box3f    worldBounds;
 };
 
 } // streami

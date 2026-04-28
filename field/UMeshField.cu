@@ -8,27 +8,33 @@ __global__ void computeBounds(box3f *primBounds,
                               const vec3f *vertices,
                               const int *indices,
                               const int *cellIndices,
+                              const uint8_t *cellTypes,
                               size_t numCells)
 {
   size_t cellID = threadIdx.x+blockIdx.x*blockDim.x;
   if (cellID >= numCells) return;
 
+  int numIndices = -1;
+  switch (cellTypes[cellID]) {
+  case VTK_TET_:   numIndices = 4; break;
+  case VTK_PYR_:   numIndices = 5; break;
+  case VTK_WEDGE_: numIndices = 6; break;
+  case VTK_HEX_:   numIndices = 8; break;
+  default: break;
+  }
+  assert(numIndices>=4 && numIndices<=8);
+
   const int *I = indices + cellIndices[cellID];
-  const vec3f v0 = vertices[I[0]];
-  const vec3f v1 = vertices[I[1]];
-  const vec3f v2 = vertices[I[2]];
-  const vec3f v3 = vertices[I[3]];
-  const vec3f v4 = vertices[I[4]];
-  const vec3f v5 = vertices[I[5]];
+  vec3f V[8];
+  for (int i=0; i<numIndices; ++i) {
+    V[i] = vertices[I[i]];
+  }
 
   // primBounds:
   primBounds[cellID] = box3f(vec3f(FLT_MAX),vec3f(-FLT_MAX));
-  primBounds[cellID].extend(v0);
-  primBounds[cellID].extend(v1);
-  primBounds[cellID].extend(v2);
-  primBounds[cellID].extend(v3);
-  primBounds[cellID].extend(v4);
-  primBounds[cellID].extend(v5);
+  for (int i=0; i<numIndices; ++i) {
+    primBounds[cellID].extend(V[i]);
+  }
 
   // worldBounds:
   atomicMin(&worldBounds->lower.x,primBounds[cellID].lower.x);
@@ -39,8 +45,8 @@ __global__ void computeBounds(box3f *primBounds,
   atomicMax(&worldBounds->upper.z,primBounds[cellID].upper.z);
 }
 
-UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, vec3f *uvw,
-                       size_t numVertices, size_t numIndices, size_t numCells)
+UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, uint8_t *cellTypes,
+                       vec3f *uvw, size_t numVertices, size_t numIndices, size_t numCells)
   : numVertices(numVertices), numIndices(numIndices), numCells(numCells)
 {
   CUDA_SAFE_CALL(cudaMalloc(&d_vertices, sizeof(vertices[0])*numVertices));
@@ -59,6 +65,12 @@ UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, vec3f *u
   CUDA_SAFE_CALL(cudaMemcpy(d_cellIndices,
                             cellIndices,
                             sizeof(cellIndices[0])*numCells,
+                            cudaMemcpyHostToDevice));
+
+  CUDA_SAFE_CALL(cudaMalloc(&d_cellTypes, sizeof(cellTypes[0])*numCells));
+  CUDA_SAFE_CALL(cudaMemcpy(d_cellTypes,
+                            cellTypes,
+                            sizeof(cellTypes[0])*numCells,
                             cudaMemcpyHostToDevice));
 
   CUDA_SAFE_CALL(cudaMalloc(&d_uvw, sizeof(uvw[0])*numCells));
@@ -82,6 +94,7 @@ UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, vec3f *u
                                                 d_vertices,
                                                 d_indices,
                                                 d_cellIndices,
+                                                d_cellTypes,
                                                 numCells);
 
   CUDA_SAFE_CALL(cudaMemcpy(&worldBounds,dWorldBounds,sizeof(worldBounds),
@@ -104,6 +117,7 @@ UMeshField::~UMeshField()
   CUDA_SAFE_CALL(cudaFree(d_vertices));
   CUDA_SAFE_CALL(cudaFree(d_indices));
   CUDA_SAFE_CALL(cudaFree(d_cellIndices));
+  CUDA_SAFE_CALL(cudaFree(d_cellTypes));
 }
 
 box3f UMeshField::computeWorldBounds() const
@@ -118,6 +132,7 @@ UMeshField::DD UMeshField::getDD(const RankInfo &ri)
   dd.vertices    = d_vertices;
   dd.indices     = d_indices;
   dd.cellIndices = d_cellIndices;
+  dd.cellTypes   = d_cellTypes;
   dd.uvw         = d_uvw;
   dd.numVertices = numVertices;
   dd.numIndices  = numIndices;

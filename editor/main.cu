@@ -140,6 +140,7 @@ static anari::World generateScene(anari::Device device,
                                   const std::vector<vec3f> &vertices,
                                   const std::vector<int> &indices,
                                   const std::vector<int> &cellIndices,
+                                  const std::vector<uint8_t> &cellTypes,
                                   const std::vector<vec3f> &uvw)
 {
   float minValue{1e30f};
@@ -149,18 +150,6 @@ static anari::World generateScene(anari::Device device,
     magnitude[i] = length(uvw[i]);
     minValue = fminf(minValue,magnitude[i]);
     maxValue = fmaxf(maxValue,magnitude[i]);
-  }
-
-  enum {
-    VTK_TET_ = 10,
-    VTK_HEX_ = 12,
-    VTK_WEDGE_ = 13,
-    VTK_PYR_ = 14,
-    VTK_BEZIER_HEX_ = 79,
-  };
-  std::vector<uint8_t> cellType(cellIndices.size());
-  for (size_t i=0; i<cellType.size(); ++i) {
-    cellType[i] = VTK_WEDGE_;
   }
 
   g_appState.field = anari::newObject<anari::SpatialField>(device, "unstructured");
@@ -176,8 +165,8 @@ static anari::World generateScene(anari::Device device,
       g_appState.field,
       "cell.type",
       ANARI_UINT8,
-      cellType.data(),
-      cellType.size());
+      cellTypes.data(),
+      cellTypes.size());
 
   anari::setParameterArray1D(device,
       g_appState.field,
@@ -561,63 +550,71 @@ int main(int argc, char *argv[]) {
       std::vector<vec3f> vertices;
       std::vector<int> indices;
       std::vector<int> cellIndices;
+      std::vector<uint8_t> cellTypes;
       std::vector<vec3f> uvw;
 
       std::vector<int> old2new(inMesh->vertices.size(),-1);
 
       sphericalBounds = box3f(vec3f(1e30f),vec3f(-1e30f));
 
-      for (size_t i=0; i<inMesh->wedges.size(); ++i) {
-        bool ours = false;
-        for (int j=0; j<6; ++j) {
-          int vertID = inMesh->wedges[i][j];
-          auto vv = inMesh->vertices[vertID];
-          vec3f v(vv.x,vv.y,vv.z);
-          if (localMC.domain.contains(v)) {
-            ours = true;
-            break;
+      auto compactVertices = [&](auto &elems, int stride) {
+        for (size_t i=0; i<elems.size(); ++i) {
+          bool ours = false;
+          for (int j=0; j<stride; ++j) {
+            int vertID = elems[i][j];
+            auto vv = inMesh->vertices[vertID];
+            vec3f v(vv.x,vv.y,vv.z);
+            if (localMC.domain.contains(v)) {
+              ours = true;
+              break;
+            }
+          }
+
+          if (!ours) continue;
+
+          for (int j=0; j<stride; ++j) {
+            int vertID = elems[i][j];
+            auto vv = inMesh->vertices[vertID];
+            vec3f v(vv.x,vv.y,vv.z);
+            if (old2new[vertID] < 0) {
+              old2new[vertID] = (int)vertices.size();
+              vertices.push_back(v);
+              sphericalBounds.extend(toSpherical(v));
+            }
           }
         }
+      };
 
-        if (!ours) continue;
-
-        for (int j=0; j<6; ++j) {
-          int vertID = inMesh->wedges[i][j];
-          auto vv = inMesh->vertices[vertID];
-          vec3f v(vv.x,vv.y,vv.z);
-          if (old2new[vertID] < 0) {
-            old2new[vertID] = (int)vertices.size();
-            vertices.push_back(v);
-            sphericalBounds.extend(toSpherical(v));
+      auto makeCells = [&](auto &elems, uint8_t type, int stride) {
+        for (size_t i=0, cellIndex=0; i<elems.size(); ++i) {
+          for (int j=0; j<stride; ++j) {
+            int I = old2new[elems[i][j]];
+            if (I<0) // not ours
+              continue;
+            indices.push_back(I);
           }
+
+          cellIndices.push_back(cellIndex);
+          cellTypes.push_back(type);
+          cellIndex += stride;
+          // u/v/w direction vectors stored in
+          // the first three vertices:
+          float u = inMesh->perVertex->values[elems[i][0]];
+          float v = inMesh->perVertex->values[elems[i][1]];
+          float w = inMesh->perVertex->values[elems[i][2]];
+          uvw.push_back({u,v,w});
         }
-      }
+      };
 
-      // TODO: for now only wedges...
+      compactVertices(inMesh->tets,4);
+      compactVertices(inMesh->pyrs,5);
+      compactVertices(inMesh->wedges,6);
+      compactVertices(inMesh->hexes,8);
 
-      for (size_t i=0, cellIndex=0; i<inMesh->wedges.size(); ++i) {
-        int I[6];
-        for (int j=0; j<6; ++j) {
-          I[j] = old2new[inMesh->wedges[i][j]];
-        }
-        if (I[0]<0 || I[1]<0 || I[2]<0 || I[3]<0 || I[4]<0 || I[5]<0) // not ours!
-          continue;
-
-        indices.push_back(I[0]);
-        indices.push_back(I[1]);
-        indices.push_back(I[2]);
-        indices.push_back(I[3]);
-        indices.push_back(I[4]);
-        indices.push_back(I[5]);
-        cellIndices.push_back(cellIndex);
-        cellIndex += 6;
-        // u/v/w direction vectors stored in
-        // the first three vertices:
-        float u = inMesh->perVertex->values[inMesh->wedges[i][0]];
-        float v = inMesh->perVertex->values[inMesh->wedges[i][1]];
-        float w = inMesh->perVertex->values[inMesh->wedges[i][2]];
-        uvw.push_back({u,v,w});
-      }
+      makeCells(inMesh->tets,streami::VTK_TET_,4);
+      makeCells(inMesh->pyrs,streami::VTK_PYR_,5);
+      makeCells(inMesh->wedges,streami::VTK_WEDGE_,6);
+      makeCells(inMesh->hexes,streami::VTK_HEX_,8);
 
       std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
         << " out of " << inMesh->vertices.size() << " vertices\n";
@@ -628,6 +625,7 @@ int main(int argc, char *argv[]) {
       field = std::make_shared<streami::UMeshField>(vertices.data(),
                                                     indices.data(),
                                                     cellIndices.data(),
+                                                    cellTypes.data(),
                                                     uvw.data(),
                                                     vertices.size(),
                                                     indices.size(),
@@ -635,7 +633,7 @@ int main(int argc, char *argv[]) {
       tracer.setField((const streami::UMeshField::SP &)field, f);
 
       if (f == 0) {
-        world = generateScene(device,vertices,indices,cellIndices,uvw);
+        world = generateScene(device,vertices,indices,cellIndices,cellTypes,uvw);
       }
     }
   } else {

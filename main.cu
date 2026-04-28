@@ -12,6 +12,7 @@
 #include "rafi/implementation.h"
 // ours
 #include "streami.h"
+#include "profiling.h"
 #include "field/Spherical.h"
 #include "field/StructuredField.h"
 #include "field/UMeshField.h"
@@ -412,6 +413,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   int i=0;
   for (; i<steps; ++i) {
+    RECORD_TIME("beforeUpdate")
     if (localN) {
       box1f *magrange=nullptr;
       box1f hrange(FLT_MAX,-FLT_MAX);
@@ -429,7 +431,9 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
         std::cout << "magnitude range: " << hrange << '\n';
       }
     }
+    RECORD_TIME("afterUpdate")
     rafi::ForwardResult result = rafi->forwardRays();
+    RECORD_TIME("afterFwd")
     io.append(output,localN,colors.data(),colors.size());
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "STEP " << i << ", rank " << ri.rankID << " in queue: " << localN << '\n';
@@ -446,6 +450,7 @@ void main_RAW(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       break;
   }
   std::cout << "Done\n";
+  PRINT_PROFILING_REPORT()
 
   std::string fileName = "streamlines";
   fileName += std::to_string(ri.rankID);
@@ -721,11 +726,14 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   int i=0;
   for (; i<steps; ++i) {
+    RECORD_TIME("beforeUpdate")
     if (localN) {
       call_update_UMeshField(
           field,rafi->getDeviceInterface(),output,localN,stepsize,minlength);
     }
+    RECORD_TIME("afterUpdate")
     rafi::ForwardResult result = rafi->forwardRays();
+    RECORD_TIME("afterFwd")
     io.append(output,localN,colors.data(),colors.size());
     localN = result.numRaysInIncomingQueueThisRank;
     std::cout << "STEP " << i << ", rank " << ri.rankID << " in queue: " << localN << '\n';
@@ -742,6 +750,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       break;
   }
   std::cout << "Done\n";
+  PRINT_PROFILING_REPORT()
 
   std::string fileName = "streamlines";
   fileName += std::to_string(ri.rankID);

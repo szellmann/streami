@@ -648,6 +648,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
         float v = inMesh->perVertex->values[elems[i][1]];
         float w = inMesh->perVertex->values[elems[i][2]];
         uvw.push_back({u,v,w});
+      } else {
+        uvw.push_back(uvwFromFile[i]);
       }
     }
   };
@@ -661,8 +663,6 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   makeCells(inMesh->pyrs,VTK_PYR_,5);
   makeCells(inMesh->wedges,VTK_WEDGE_,6);
   makeCells(inMesh->hexes,VTK_HEX_,8);
-
-  if (!uvwFromFile.empty()) uvw = uvwFromFile;
 
   std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
     << " out of " << inMesh->vertices.size() << " vertices\n";

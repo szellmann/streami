@@ -4,7 +4,7 @@
 namespace streami {
 
 __global__ void computeBounds(box3f *primBounds,
-                              box3f *worldBounds,
+                              box3f *localWorldBounds,
                               const vec3f *vertices,
                               const int *indices,
                               const int *cellIndices,
@@ -36,18 +36,19 @@ __global__ void computeBounds(box3f *primBounds,
     primBounds[cellID].extend(V[i]);
   }
 
-  // worldBounds:
-  atomicMin(&worldBounds->lower.x,primBounds[cellID].lower.x);
-  atomicMin(&worldBounds->lower.y,primBounds[cellID].lower.y);
-  atomicMin(&worldBounds->lower.z,primBounds[cellID].lower.z);
-  atomicMax(&worldBounds->upper.x,primBounds[cellID].upper.x);
-  atomicMax(&worldBounds->upper.y,primBounds[cellID].upper.y);
-  atomicMax(&worldBounds->upper.z,primBounds[cellID].upper.z);
+  // localWorldBounds:
+  atomicMin(&localWorldBounds->lower.x,primBounds[cellID].lower.x);
+  atomicMin(&localWorldBounds->lower.y,primBounds[cellID].lower.y);
+  atomicMin(&localWorldBounds->lower.z,primBounds[cellID].lower.z);
+  atomicMax(&localWorldBounds->upper.x,primBounds[cellID].upper.x);
+  atomicMax(&localWorldBounds->upper.y,primBounds[cellID].upper.y);
+  atomicMax(&localWorldBounds->upper.z,primBounds[cellID].upper.z);
 }
 
-UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, uint8_t *cellTypes,
+UMeshField::UMeshField(const box3f &worldBounds,
+                       vec3f *vertices, int *indices, int *cellIndices, uint8_t *cellTypes,
                        vec3f *uvw, size_t numVertices, size_t numIndices, size_t numCells)
-  : numVertices(numVertices), numIndices(numIndices), numCells(numCells)
+  : worldBounds(worldBounds), numVertices(numVertices), numIndices(numIndices), numCells(numCells)
 {
   CUDA_SAFE_CALL(cudaMalloc(&d_vertices, sizeof(vertices[0])*numVertices));
   CUDA_SAFE_CALL(cudaMemcpy(d_vertices,
@@ -79,14 +80,14 @@ UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, uint8_t 
                             sizeof(uvw[0])*numCells,
                             cudaMemcpyHostToDevice));
 
-  worldBounds = box3f(vec3f(FLT_MAX),vec3f(-FLT_MAX));
+  box3f localWorldBounds(vec3f(FLT_MAX),vec3f(-FLT_MAX));
 
   box3f *primBounds;
   CUDA_SAFE_CALL(cudaMalloc(&primBounds, sizeof(primBounds[0])*numCells));
 
   box3f *dWorldBounds;
   CUDA_SAFE_CALL(cudaMalloc(&dWorldBounds, sizeof(*dWorldBounds)));
-  CUDA_SAFE_CALL(cudaMemcpy(dWorldBounds,&worldBounds,sizeof(worldBounds),
+  CUDA_SAFE_CALL(cudaMemcpy(dWorldBounds,&localWorldBounds,sizeof(localWorldBounds),
                             cudaMemcpyHostToDevice));
 
   computeBounds<<<iDivUp(numCells,1024),1024>>>(primBounds,
@@ -97,9 +98,9 @@ UMeshField::UMeshField(vec3f *vertices, int *indices, int *cellIndices, uint8_t 
                                                 d_cellTypes,
                                                 numCells);
 
-  CUDA_SAFE_CALL(cudaMemcpy(&worldBounds,dWorldBounds,sizeof(worldBounds),
+  CUDA_SAFE_CALL(cudaMemcpy(&localWorldBounds,dWorldBounds,sizeof(localWorldBounds),
                             cudaMemcpyDeviceToHost));
-  std::cout << "WORLD BOUNDS: " << worldBounds << '\n';
+  std::cout << "LOCAL WORLD BOUNDS: " << localWorldBounds << '\n';
 
   cuBQL::DeviceMemoryResource memResource;
   cuBQL::gpuBuilder(bvh,

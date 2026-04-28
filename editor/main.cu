@@ -622,7 +622,8 @@ int main(int argc, char *argv[]) {
       std::cout << "rank #" << ri.rankID << " gets " << uvw.size()
         << " out of " << inMesh->wedges.size() << " wedge cells\n";
 
-      field = std::make_shared<streami::UMeshField>(vertices.data(),
+      field = std::make_shared<streami::UMeshField>(worldBounds,  
+                                                    vertices.data(),
                                                     indices.data(),
                                                     cellIndices.data(),
                                                     cellTypes.data(),

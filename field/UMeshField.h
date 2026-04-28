@@ -110,7 +110,8 @@ struct UMeshField : public VecField {
   };
 
   /* host interface for field */
-  UMeshField(vec3f *vertices, int *indices, int *cellIndices, uint8_t *cellTypes,
+  UMeshField(const box3f &worldBounds,
+             vec3f *vertices, int *indices, int *cellIndices, uint8_t *cellTypes,
              vec3f *uvw, size_t numVertices, size_t numIndices, size_t numCells);
   ~UMeshField();
 

@@ -670,7 +670,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   std::cout << "rank #" << ri.rankID << " gets " << uvw.size()
     << " out of " << inMesh->wedges.size() << " wedge cells\n";
 
-  auto field = std::make_shared<UMeshField>(vertices.data(),
+  auto field = std::make_shared<UMeshField>(worldBounds,
+                                            vertices.data(),
                                             indices.data(),
                                             cellIndices.data(),
                                             cellTypes.data(),

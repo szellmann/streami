@@ -523,6 +523,14 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   }
 
   vec3i gridSize{1};
+
+  float minlength = 1e-3f;
+  float stepsize = 1.f;
+  int steps=1000;
+  int numParticles=100000;
+  float halo = 0.f;
+  bool verbose=false;
+
   for (int i=2;i<argc;i++) {
     std::string arg(argv[i]);
     if (arg[0] == '-') {
@@ -534,6 +542,24 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       }
       if (arg == "-gz") {
         gridSize.z = std::stoi(argv[++i]);
+      }
+      if (arg == "-stepsize") {
+        stepsize = atof(argv[++i]);
+      }
+      if (arg == "-minlength") {
+        minlength = atof(argv[++i]);
+      }
+      if (arg == "-numparticles") {
+        numParticles = std::stoi(argv[++i]);
+      }
+      if (arg == "-numsteps") {
+        steps = std::stoi(argv[++i]);
+      }
+      if (arg == "-halo") {
+        halo = atof(argv[++i]);
+      }
+      if (arg == "-v") {
+        verbose = true;
       }
     }
   }
@@ -553,7 +579,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     {umeshBounds.upper.x,umeshBounds.upper.y,umeshBounds.upper.z}
   };
 
-  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,worldBounds.size().x/10.f);
+  MacroCell localMC = makeMacroCell(worldBounds,gridSize,ri,halo);
 
   std::vector<vec3f> vertices;
   std::vector<int> indices;
@@ -639,7 +665,7 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   field->numMCs = gridSize;
   field->mc = localMC;
 
-  int N=300000;
+  int N=numParticles;
   int localN=iDivUp(N,ri.commSize);
   N = localN*ri.commSize;
   rafi->resizeRayQueues(N);
@@ -672,8 +698,6 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     globalIO.append(all.data(),all.size(),colors.data(),colors.size());
   }
 
-  int steps=100000;
-
   std::cout << "Computing " << steps << " Runge-Kutta steps for "
       << localN << " out of " << N << " particles on rank " << ri.rankID << "...\n";
 
@@ -681,12 +705,12 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   for (; i<steps; ++i) {
     if (localN) {
       call_update_UMeshField(
-          field,rafi->getDeviceInterface(),output,localN,100.f,1.f);
+          field,rafi->getDeviceInterface(),output,localN,stepsize,minlength);
     }
     rafi::ForwardResult result = rafi->forwardRays();
     io.append(output,localN,colors.data(),colors.size());
     localN = result.numRaysInIncomingQueueThisRank;
-    std::cout << "rank " << ri.rankID << " in queue: " << localN << '\n';
+    std::cout << "STEP " << i << ", rank " << ri.rankID << " in queue: " << localN << '\n';
 
     int globalN = result.numRaysAliveAcrossAllRanks;
     MPI_SAFE_CALL(MPI_Allreduce(&localN,&globalN,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD));

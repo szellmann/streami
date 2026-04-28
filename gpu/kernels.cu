@@ -56,7 +56,7 @@ void call_update_UMeshField(const VecField::SP field,
   const UMeshField::SP &sfield = (const UMeshField::SP &)field;
   const UMeshField::DD &fieldDD = sfield->getDD(ri);
 
-  CONFIG_KERNEL(update,numParticles)(
+  CONFIG_KERNEL_512(update,numParticles)(
       fieldDD,rafi,output,numParticles,stepSize,minLength,0);
 }
 

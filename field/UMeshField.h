@@ -85,6 +85,7 @@ struct UMeshField : public VecField {
           const vec4f v5(vertices[I[5]],dir.z);
           const vec4f v6(vertices[I[6]],dir.x);
           const vec4f v7(vertices[I[7]],dir.y);
+          const vec4f v(dir,1.f);
           if (intersectHexEXT(value,P,v0,v1,v2,v3,v4,v5,v6,v7)) {
             hit = true;
             return CUBQL_TERMINATE_TRAVERSAL;

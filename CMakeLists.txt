@@ -33,4 +33,10 @@ target_include_directories(${PROJECT_NAME}_library PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
 )
 add_subdirectory(editor)
-add_subdirectory(tools/convert_icon)
+
+# cmdline tools used for data wrangling, etc.
+# we don't usually need these to run the examples
+option(BUILD_CMDLINE_TOOLS "Build with cmdline tools" OFF)
+if(BUILD_CMDLINE_TOOLS)
+  add_subdirectory(tools/convert_icon)
+endif()

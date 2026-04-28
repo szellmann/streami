@@ -127,15 +127,14 @@ static
 size_t getOrAddVertex(
     umesh::vec3i pos,
     std::map<umesh::vec3i,size_t> &mapping,
-    umesh::UMesh::SP umesh,
-    float value)
+    umesh::UMesh::SP umesh
+    )
 {
   auto it = mapping.find(pos);
   if (it != mapping.end()) return it->second;
 
   size_t newID = umesh->vertices.size();
   umesh->vertices.push_back(umesh::vec3f(pos.x,pos.y,pos.z));
-  umesh->perVertex->values.push_back(value);
   mapping[pos] = newID;
   return newID;
 }
@@ -467,6 +466,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     return;
   }
 
+  std::vector<vec3f> uvwFromFile;
+
   umesh::UMesh::SP inMesh{nullptr};
   if (endsWith(argv[1],".raw")) {
     vec3i dims{1};
@@ -500,14 +501,15 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
           umesh::vec3i pos(x,y,z);
           size_t index = x+y*dims.x+z*size_t(dims.x)*dims.y;
           auto value = values[index];
-          hex.base.x = (int)getOrAddVertex(pos+umesh::vec3i(0,0,0),vertexID,inMesh,value.x);
-          hex.base.y = (int)getOrAddVertex(pos+umesh::vec3i(0,0,1),vertexID,inMesh,value.y);
-          hex.base.z = (int)getOrAddVertex(pos+umesh::vec3i(0,1,1),vertexID,inMesh,value.z);
-          hex.base.w = (int)getOrAddVertex(pos+umesh::vec3i(0,1,0),vertexID,inMesh,value.x);
-          hex.top.x = (int)getOrAddVertex(pos+umesh::vec3i(1,0,0),vertexID,inMesh,value.y);
-          hex.top.y = (int)getOrAddVertex(pos+umesh::vec3i(1,0,1),vertexID,inMesh,value.z);
-          hex.top.z = (int)getOrAddVertex(pos+umesh::vec3i(1,1,1),vertexID,inMesh,value.x);
-          hex.top.w = (int)getOrAddVertex(pos+umesh::vec3i(1,1,0),vertexID,inMesh,value.y);
+          uvwFromFile.push_back(value);
+          hex.base.x = (int)getOrAddVertex(pos+umesh::vec3i(0,0,0),vertexID,inMesh);
+          hex.base.y = (int)getOrAddVertex(pos+umesh::vec3i(0,0,1),vertexID,inMesh);
+          hex.base.z = (int)getOrAddVertex(pos+umesh::vec3i(0,1,1),vertexID,inMesh);
+          hex.base.w = (int)getOrAddVertex(pos+umesh::vec3i(0,1,0),vertexID,inMesh);
+          hex.top.x = (int)getOrAddVertex(pos+umesh::vec3i(1,0,0),vertexID,inMesh);
+          hex.top.y = (int)getOrAddVertex(pos+umesh::vec3i(1,0,1),vertexID,inMesh);
+          hex.top.z = (int)getOrAddVertex(pos+umesh::vec3i(1,1,1),vertexID,inMesh);
+          hex.top.w = (int)getOrAddVertex(pos+umesh::vec3i(1,1,0),vertexID,inMesh);
 
           inMesh->hexes.push_back(hex);
         }
@@ -628,12 +630,14 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
       cellIndices.push_back(cellIndex);
       cellTypes.push_back(type);
       cellIndex += stride;
-      // u/v/w direction vectors stored in
-      // the first three vertices:
-      float u = inMesh->perVertex->values[elems[i][0]];
-      float v = inMesh->perVertex->values[elems[i][1]];
-      float w = inMesh->perVertex->values[elems[i][2]];
-      uvw.push_back({u,v,w});
+      if (uvwFromFile.empty()) {
+        // u/v/w direction vectors stored in
+        // the first three vertices:
+        float u = inMesh->perVertex->values[elems[i][0]];
+        float v = inMesh->perVertex->values[elems[i][1]];
+        float w = inMesh->perVertex->values[elems[i][2]];
+        uvw.push_back({u,v,w});
+      }
     }
   };
 
@@ -646,6 +650,8 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
   makeCells(inMesh->pyrs,VTK_PYR_,5);
   makeCells(inMesh->wedges,VTK_WEDGE_,6);
   makeCells(inMesh->hexes,VTK_HEX_,8);
+
+  if (!uvwFromFile.empty()) uvw = uvwFromFile;
 
   std::cout << "rank #" << ri.rankID << " gets " << vertices.size()
     << " out of " << inMesh->vertices.size() << " vertices\n";

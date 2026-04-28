@@ -620,10 +620,21 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
 
   auto makeCells = [&](auto &elems, uint8_t type, int stride) {
     for (size_t i=0, cellIndex=0; i<elems.size(); ++i) {
+      bool ours = true;
       for (int j=0; j<stride; ++j) {
         int I = old2new[elems[i][j]];
-        if (I<0) // not ours
-          continue;
+        if (I<0) { // not ours
+          ours = false;
+          break;
+        }
+      }
+
+      if (!ours) continue;
+
+      for (int j=0; j<stride; ++j) {
+        int I = old2new[elems[i][j]];
+        //if (I<0) // not ours
+        //  continue;
         indices.push_back(I);
       }
 

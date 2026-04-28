@@ -78,7 +78,7 @@ Tracer::Tracer(Context &ctx, const Tracer::Params &p)
 void Tracer::setField(const StructuredField::SP &f, size_t timeStep)
 {
   insertField(f,timeStep);
-  assert(fileType == Undefined);
+  //assert(fieldType == Undefined);
   fieldType = Structured;
   lastInitRequest = newTimeStamp();
 }
@@ -86,7 +86,7 @@ void Tracer::setField(const StructuredField::SP &f, size_t timeStep)
 void Tracer::setField(const UMeshField::SP &f, size_t timeStep)
 {
   insertField(f,timeStep);
-  assert(fileType == Undefined);
+  //assert(fieldType == Undefined);
   fieldType = UMesh;
   lastInitRequest = newTimeStamp();
 }
@@ -136,8 +136,20 @@ bool Tracer::step()
 
   int particlesLeft = result.numRaysAliveAcrossAllRanks;
 
-  if (localN >= maxN) {
-    resizeRayQueues(localN);
+// if (localN >= maxN) {
+  //   resizeRayQueues(localN);
+  // }
+
+  RankInfo ri{rafi->mpi.rank, rafi->mpi.size};
+  size_t batchN = globalN / ri.commSize;
+  if (params.mode == Params::Streaklines) {
+      if (localN + (int)batchN >= maxN) {
+          resizeRayQueues(localN + batchN);
+      }
+  } else {
+      if (localN >= maxN) {
+          resizeRayQueues(localN);
+      }
   }
 
   return particlesLeft > 0;

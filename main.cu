@@ -12,6 +12,7 @@
 #include "rafi/implementation.h"
 // ours
 #include "streami.h"
+#define PROFILING
 #include "profiling.h"
 #include "field/Spherical.h"
 #include "field/StructuredField.h"
@@ -124,20 +125,29 @@ inline bool endsWith(const std::string &s, const std::string &suffix) {
   return s.substr(s.size()-suffix.size(),suffix.size()) == suffix;
 }
 
-static
-size_t getOrAddVertex(
-    umesh::vec3i pos,
-    std::map<umesh::vec3i,size_t> &mapping,
-    umesh::UMesh::SP umesh
-    )
+// Optimized for structured grids: compute vertex ID directly from position
+static inline
+size_t getVertexID(umesh::vec3i pos, vec3i dims)
 {
-  auto it = mapping.find(pos);
-  if (it != mapping.end()) return it->second;
+  return pos.x + pos.y * size_t(dims.x + 1) + pos.z * size_t(dims.x + 1) * (dims.y + 1);
+}
 
-  size_t newID = umesh->vertices.size();
-  umesh->vertices.push_back(umesh::vec3f(pos.x,pos.y,pos.z));
-  mapping[pos] = newID;
-  return newID;
+// Pre-allocate all vertices for a structured grid
+static
+void preallocateStructuredGridVertices(umesh::UMesh::SP umesh, vec3i dims)
+{
+  size_t numVertices = size_t(dims.x + 1) * (dims.y + 1) * (dims.z + 1);
+  umesh->vertices.resize(numVertices);
+  
+  #pragma omp parallel for collapse(3)
+  for (int z = 0; z <= dims.z; ++z) {
+    for (int y = 0; y <= dims.y; ++y) {
+      for (int x = 0; x <= dims.x; ++x) {
+        size_t id = getVertexID(umesh::vec3i(x, y, z), dims);
+        umesh->vertices[id] = umesh::vec3f(x, y, z);
+      }
+    }
+  }
 }
 
 __host__ __device__
@@ -497,8 +507,15 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
     std::vector<vec3f> values(dims.x*size_t(dims.y)*dims.z);
     in.read((char *)values.data(),sizeof(values[0])*values.size());
 
-    std::map<umesh::vec3i,size_t> vertexID;
+    // Pre-allocate all vertices for the structured grid
+    preallocateStructuredGridVertices(inMesh, dims);
 
+    // Pre-allocate vectors to maintain order during parallel execution
+    size_t totalElements = dims.x * size_t(dims.y) * dims.z;
+    uvwFromFile.resize(totalElements);
+    inMesh->hexes.resize(totalElements);
+
+    #pragma omp parallel for collapse(3)
     for (int z=0;z<dims.z;++z) {
       for (int y=0;y<dims.y;++y) {
         for (int x=0;x<dims.x;++x) {
@@ -506,17 +523,17 @@ void main_UMesh(int argc, char **argv, rafi::HostContext<Particle> *rafi) {
           umesh::vec3i pos(x,y,z);
           size_t index = x+y*dims.x+z*size_t(dims.x)*dims.y;
           auto value = values[index];
-          uvwFromFile.push_back(value);
-          hex.base.x = (int)getOrAddVertex(pos+umesh::vec3i(0,0,0),vertexID,inMesh);
-          hex.base.y = (int)getOrAddVertex(pos+umesh::vec3i(0,0,1),vertexID,inMesh);
-          hex.base.z = (int)getOrAddVertex(pos+umesh::vec3i(0,1,1),vertexID,inMesh);
-          hex.base.w = (int)getOrAddVertex(pos+umesh::vec3i(0,1,0),vertexID,inMesh);
-          hex.top.x = (int)getOrAddVertex(pos+umesh::vec3i(1,0,0),vertexID,inMesh);
-          hex.top.y = (int)getOrAddVertex(pos+umesh::vec3i(1,0,1),vertexID,inMesh);
-          hex.top.z = (int)getOrAddVertex(pos+umesh::vec3i(1,1,1),vertexID,inMesh);
-          hex.top.w = (int)getOrAddVertex(pos+umesh::vec3i(1,1,0),vertexID,inMesh);
+          uvwFromFile[index] = value;
+          hex.base.x = (int)getVertexID(pos+umesh::vec3i(0,0,0), dims);
+          hex.base.y = (int)getVertexID(pos+umesh::vec3i(0,0,1), dims);
+          hex.base.z = (int)getVertexID(pos+umesh::vec3i(0,1,1), dims);
+          hex.base.w = (int)getVertexID(pos+umesh::vec3i(0,1,0), dims);
+          hex.top.x = (int)getVertexID(pos+umesh::vec3i(1,0,0), dims);
+          hex.top.y = (int)getVertexID(pos+umesh::vec3i(1,0,1), dims);
+          hex.top.z = (int)getVertexID(pos+umesh::vec3i(1,1,1), dims);
+          hex.top.w = (int)getVertexID(pos+umesh::vec3i(1,1,0), dims);
 
-          inMesh->hexes.push_back(hex);
+          inMesh->hexes[index] = hex;
         }
       }
     }
